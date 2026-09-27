@@ -81,26 +81,6 @@ for (const [sym, h] of Object.entries(HOLD)) {
 }
 
 
-// ---- 한 줄 뉴스 (구글 뉴스, 최근 3일) ----
-const decode = t => t.replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-async function news(query, must) {
-  try {
-    const t = await (await fetch('https://news.google.com/rss/search?q=' + encodeURIComponent(query + ' when:3d') + '&hl=ko&gl=KR&ceid=KR:ko')).text();
-    const out = [], seen = new Set();
-    for (const m of t.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
-      const g = k => decode((m[1].match(new RegExp('<' + k + '[^>]*>([\\s\\S]*?)</' + k + '>')) || [])[1] || '');
-      const src = g('source');
-      let title = g('title'); if (src && title.endsWith(' - ' + src)) title = title.slice(0, -(src.length + 3));
-      if (!must.test(title) || /coinone\.co\.kr|upbit|bithumb/i.test(src) || /coinone\.co\.kr/.test(g('link'))) continue;
-      const key = title.replace(/\s/g, '').slice(0, 18); if (seen.has(key)) continue; seen.add(key);
-      out.push({ title, source: src, link: g('link'), date: Date.parse(g('pubDate')) });
-      if (out.length >= 3) break;
-    }
-    return out;
-  } catch { return prev?.news?.[query] || []; }
-}
-const newsRes = { SOL: await news('솔라나', /솔라나|SOL\b|Solana/i), WLD: await news('월드코인', /월드코인|WLD\b|Worldcoin/i) };
-
 // ---- 예측: 변동성(최근 90일) 기반 범위 + 센티멘트로 중앙값 소폭 조정 ----
 function band(p0, sig, S, hDays) {
   const sh = sig * Math.sqrt(hDays);
@@ -132,7 +112,6 @@ const res = {
   WLD: { price: coins.WLD.price, sigmaDaily: coins.WLD.sigmaDaily, sentiment: coins.WLD.sentiment, used: Math.round(combined('WLD')) },
   TOTAL: { value: v0, sigmaDaily: portSig },
   forecast,
-  news: newsRes,
 };
 fs.writeFileSync(OUT, JSON.stringify(res));
-console.log(JSON.stringify({ market: market.score, SOL: res.SOL.sentiment.score, WLD: res.WLD.sentiment.score, sig: [res.SOL.sigmaDaily, res.WLD.sigmaDaily, portSig].map(x => x.toFixed(4)), f7: forecast[2], news: newsRes }, null, 1));
+console.log(JSON.stringify({ market: market.score, SOL: res.SOL.sentiment.score, WLD: res.WLD.sentiment.score, sig: [res.SOL.sigmaDaily, res.WLD.sigmaDaily, portSig].map(x => x.toFixed(4)), f7: forecast[2] }, null, 1));

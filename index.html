@@ -53,8 +53,8 @@ table.fc tr.grp td{font-weight:700;color:#1a1f36;background:#f7f8fb;padding:6px 
 <div id="list"></div>
 <div class="card"><div class="sec-title">센티멘트 <span class="muted" id="fcTime"></span></div><div id="senti">불러오는 중...</div></div>
 <div class="card"><div class="sec-title">가격 예측 <span class="muted">긍정 · 중간 · 나쁨</span></div><div id="fc">불러오는 중...</div></div>
-<div class="card news"><div class="sec-title">주요 뉴스 <span class="muted">최근 3일</span></div><div id="news">불러오는 중...</div></div>
-<div class="note">센티멘트는 공포·탐욕 지수, 7일 추세, RSI, CoinGecko 투표, 시가총액 변화를 0~100점으로 합친 값이에요. 예측은 최근 90일 코인원 일별 변동폭을 기준으로 한 통계 추정이에요. 중간은 센티멘트(코인 60% + 시장 40%)로 조금 기울인 값이고, 긍정·나쁨은 그보다 표준편차 1만큼 오르거나 내린 경우예요(이 사이에 들어올 확률을 약 68%로 가정). 총액은 두 코인이 같은 시나리오로 움직인다고 보고 계산했어요. 투자 조언이 아니에요. 1시간마다 갱신돼요.</div>
+<div class="card news"><div class="sec-title">주요 뉴스 <span class="muted" id="newsTime"></span></div><div id="news">불러오는 중...</div></div>
+<div class="note">센티멘트는 공포·탐욕 지수, 7일 추세, RSI, CoinGecko 투표, 시가총액 변화를 0~100점으로 합친 값이에요. 뉴스는 5분마다 구글 뉴스(한국어, 주요 영어 매체)에서 ETF·해킹·규제·상장·업그레이드 같은 핵심 주제 기사만 골라요. 예측은 최근 90일 코인원 일별 변동폭을 기준으로 한 통계 추정이에요. 중간은 센티멘트(코인 60% + 시장 40%)로 조금 기울인 값이고, 긍정·나쁨은 그보다 표준편차 1만큼 오르거나 내린 경우예요(이 사이에 들어올 확률을 약 68%로 가정). 총액은 두 코인이 같은 시나리오로 움직인다고 보고 계산했어요. 투자 조언이 아니에요. 1시간마다 갱신돼요.</div>
 <div class="err" id="err"></div>
 </div>
 <script>
@@ -146,7 +146,7 @@ loadHistory();setInterval(loadHistory,5*60000);
 // ---- 센티멘트 · 예측 · 뉴스 ----
 const r100=v=>Math.round(v/100)*100, r1=v=>Math.round(v), r1000=v=>Math.round(v/1000)*1000;
 const fmtW=v=>v.toLocaleString('ko-KR')+'원';
-const ago=t=>{const m=Math.round((Date.now()-t)/60000);return m<60?m+'분 전':m<1440?Math.round(m/60)+'시간 전':Math.round(m/1440)+'일 전'};
+const ago=t=>{const m=Math.round((Date.now()-t)/60000);return m<1?'방금':m<60?m+'분 전':m<1440?Math.round(m/60)+'시간 전':Math.round(m/1440)+'일 전'};
 const esc=x=>String(x).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function sentiRow(name,o){const sc=o.score,cl=sc>=60?'up':sc<40?'down':'';
   return `<div class="senti"><div class="top"><span class="name">${name}</span><span><b class="${cl}" style="font-size:18px">${sc}</b><span class="muted"> / 100 · ${o.label}</span></span></div>
@@ -164,11 +164,19 @@ async function loadForecast(){
       f.forecast.map(x=>`<tr class="grp"><td colspan="4">${lab[x.days]}</td></tr>`+sc.map(([nm,k,cl])=>{
         const sp=r100(x.SOL[k]),wp=r1(x.WLD[k]),tot=r1000(sp*Q.SOL+wp*Q.WLD),rt=(tot-COST)/COST*100;
         return `<tr><td><span class="${cl}">${nm}</span></td><td>${fmtW(sp)}</td><td>${fmtW(wp)}</td><td><b>${fmtW(tot)}</b> ${rate(rt)}</td></tr>`}).join('')).join('')+`</table>`;
-    const nl=(arr)=>arr.length?arr.map(n=>`<a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}<span>${esc(n.source)} · ${ago(n.date)}</span></a>`).join(''):'<div class="muted">최근 3일 뉴스가 없어요.</div>';
-    document.getElementById('news').innerHTML=`<h4>솔라나</h4>${nl(f.news?.SOL||[])}<h4>월드코인</h4>${nl(f.news?.WLD||[])}`;
-  }catch(e){['senti','fc','news'].forEach(id=>document.getElementById(id).textContent='아직 계산된 데이터가 없어요. 잠시 후 다시 확인해 주세요.')}
+  }catch(e){['senti','fc'].forEach(id=>document.getElementById(id).textContent='아직 계산된 데이터가 없어요. 잠시 후 다시 확인해 주세요.')}
 }
 loadForecast();setInterval(loadForecast,10*60000);
+async function loadNews(){
+  try{
+    const f=await (await fetch('https://raw.githubusercontent.com/jtl10231-oss/coin-total/data/news.json?t='+Date.now())).json();
+    const item=n=>`<a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}<span>${esc(n.source)} · ${ago(n.date)}</span></a>`;
+    const block=(arr,lat)=>arr.length?arr.map(item).join(''):`<div class="muted" style="padding:6px 0">최근 48시간 동안 중요 뉴스가 없어요.</div>`+(lat?`<div style="opacity:.55">${item(lat)}</div>`:'');
+    document.getElementById('news').innerHTML=`<h4>솔라나</h4>${block(f.SOL||[],f.SOL_latest)}<h4>월드코인</h4>${block(f.WLD||[],f.WLD_latest)}`;
+    document.getElementById('newsTime').textContent=ago(f.updated)+' 확인';
+  }catch(e){document.getElementById('news').textContent='뉴스를 불러오지 못했어요.'}
+}
+loadNews();setInterval(loadNews,3*60000);
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 connect();
 </script></body></html>
