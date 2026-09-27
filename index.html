@@ -18,13 +18,11 @@ h1{font-size:20px;margin:0 0 4px}.sub{color:#6b7280;font-size:13px;margin-bottom
 <h1>코인원 기준 보유 코인 총액</h1>
 <div class="sub">코인원 원화 마켓 현재가 · 실시간 갱신 · <span id="time">연결 중...</span></div>
 <div class="card total"><div class="label">총 평가금액</div><div class="v" id="total">불러오는 중...</div>
-<div class="pl"><span>원금 10,000,000원 대비</span><span><b id="rate">-</b> <span id="profit"></span></span></div>
 <div class="pl"><span>매수금액 <span id="cost"></span> 대비</span><span><b id="rate2">-</b> <span id="profit2"></span></span></div></div>
 <div id="list"></div>
 <div class="err" id="err"></div>
 </div>
 <script>
-const PRINCIPAL=10000000;
 const coins=[{sym:'SOL',name:'솔라나',qty:42.32,buy:165000},{sym:'WLD',name:'월드코인',qty:4126.54,buy:730}];
 const won=n=>Math.round(n).toLocaleString('ko-KR')+'원';
 const sign=n=>(n>=0?'+':'-');
@@ -47,10 +45,7 @@ function render(){
   document.getElementById('rate2').textContent=sign(pr2)+Math.abs(pr2).toFixed(2)+'%';
   document.getElementById('profit2').textContent='('+sign(p2)+won(Math.abs(p2))+')';
   document.getElementById('total').textContent=won(sum);
-  const p=sum-PRINCIPAL,pr=p/PRINCIPAL*100;
-  document.getElementById('rate').textContent=sign(pr)+Math.abs(pr).toFixed(2)+'%';
-  document.getElementById('profit').textContent='('+sign(p)+won(Math.abs(p))+')';
-  document.title=won(sum)+' ('+sign(pr)+Math.abs(pr).toFixed(2)+'%)';
+  document.title=won(sum)+' ('+sign(pr2)+Math.abs(pr2).toFixed(2)+'%)';
 }
 let ws,pingTimer;
 function connect(){
