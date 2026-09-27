@@ -99,10 +99,15 @@ const totalOf=(s,w)=>s*coins[0].qty+w*coins[1].qty;
 const COST=coins.reduce((a,c)=>a+c.buy*c.qty,0);
 async function loadHistory(){
   try{const h=await (await fetch('https://raw.githubusercontent.com/jtl10231-oss/coin-total/data/history.json?t='+Date.now())).json();
-    h.SOL.forEach((v,i)=>{const t=h.t0+i*h.step;if(!series.has(t))series.set(t,totalOf(v,h.WLD[i]))});drawChart();
+    const cur=Math.floor(Date.now()/STEP)*STEP;h.SOL.forEach((v,i)=>{const t=h.t0+i*h.step;if(t<cur)series.set(t,totalOf(v,h.WLD[i]))});drawChart();
   }catch(e){document.getElementById('tip').textContent='지난 기록을 불러오지 못했어요. 지금부터 쌓이는 값만 보여요.'}
 }
-function addLive(){if(coins.some(c=>c.price==null))return;const t=Math.floor(Date.now()/STEP)*STEP;series.set(t,totalOf(coins[0].price,coins[1].price));drawChart();}
+const LS='liveTotals';
+try{const o=JSON.parse(localStorage.getItem(LS)||'{}');const cut=Date.now()-7*1440*STEP;Object.entries(o).forEach(([t,v])=>{if(+t>=cut)series.set(+t,v)})}catch(e){}
+let lastSave=0;
+function addLive(){if(coins.some(c=>c.price==null))return;const t=Math.floor(Date.now()/STEP)*STEP;series.set(t,totalOf(coins[0].price,coins[1].price));
+  if(Date.now()-lastSave>15000){lastSave=Date.now();try{const cut=Date.now()-1440*STEP,o={};series.forEach((v,k)=>{if(k>=cut)o[k]=v});localStorage.setItem(LS,JSON.stringify(o))}catch(e){}}
+  drawChart();}
 const man=v=>(v/10000).toLocaleString('ko-KR',{maximumFractionDigits:0})+'만';
 const hm=t=>{const d=new Date(t);return (range>1440?(d.getMonth()+1)+'/'+d.getDate()+' ':'')+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')};
 function pts(){const now=Date.now(),from=now-range*STEP;return [...series.entries()].filter(([t])=>t>=from).sort((a,b)=>a[0]-b[0]);}
