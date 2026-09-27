@@ -20,6 +20,7 @@ jobs:
         run: |
           git fetch origin data || true
           node collect.mjs /tmp/history.json
+          node forecast.mjs /tmp/forecast.json || true
       - name: publish to data branch
         run: |
           git config user.name "github-actions[bot]"
@@ -28,5 +29,6 @@ jobs:
           git rm -rf -q --cached .
           cp /tmp/history.json history.json
           git add history.json
+          if [ -f /tmp/forecast.json ]; then cp /tmp/forecast.json forecast.json; git add forecast.json; fi
           git commit -q -m "history update"
           git push -f origin data-new:data
