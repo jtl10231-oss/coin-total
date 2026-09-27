@@ -14,11 +14,19 @@ h1{font-size:20px;margin:0 0 4px}.sub{color:#6b7280;font-size:13px;margin-bottom
 .val{font-weight:700;font-size:18px;text-align:right}
 .up{color:#e11d48}.down{color:#2563eb}
 .err{color:#e11d48;font-size:13px;margin-top:8px}
+.chart-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.tabs button{border:0;background:#eef1f7;color:#374151;padding:6px 10px;border-radius:8px;font-size:13px;margin-left:4px;cursor:pointer}
+.tabs button.on{background:#1f4bd8;color:#fff}
+#chart{width:100%;height:220px;display:block;touch-action:none}
+.tip{font-size:13px;color:#374151;min-height:18px;margin-top:6px}
 </style></head><body><div class="wrap">
 <h1>코인원 기준 보유 코인 총액</h1>
 <div class="sub">코인원 원화 마켓 현재가 · 실시간 갱신 · <span id="time">연결 중...</span></div>
 <div class="card total"><div class="label">총 평가금액</div><div class="v" id="total">불러오는 중...</div>
 <div class="pl"><span>수익률</span><span><b id="rate2">-</b> <span id="profit2"></span></span></div></div>
+<div class="card"><div class="chart-head"><div class="name">평가금액 변화 <span class="muted">1분 단위</span></div>
+<div class="tabs"><button data-m="60">1시간</button><button data-m="360" class="on">6시간</button><button data-m="1440">24시간</button><button data-m="10080">7일</button></div></div>
+<canvas id="chart"></canvas><div class="tip" id="tip">기록 불러오는 중...</div></div>
 <div id="list"></div>
 <div class="err" id="err"></div>
 </div>
@@ -54,8 +62,52 @@ function connect(){
     clearInterval(pingTimer);pingTimer=setInterval(()=>ws.readyState===1&&ws.send(JSON.stringify({request_type:'PING'})),60000);};
   ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.response_type!=='DATA')return;const d=m.data;
     const c=coins.find(x=>x.sym===d.target_currency);if(!c)return;c.price=+d.last;c.rate=(d.last-d.first)/d.first*100;
-    document.getElementById('time').textContent=new Date(+d.timestamp).toLocaleTimeString('ko-KR')+' 기준';render();};
+    document.getElementById('time').textContent=new Date(+d.timestamp).toLocaleTimeString('ko-KR')+' 기준';render();addLive();};
   ws.onclose=()=>{document.getElementById('err').textContent='연결이 끊겨 다시 연결 중...';setTimeout(connect,3000)};
 }
+
+// ---- 차트 ----
+const STEP=60000;let series=new Map(),range=360,hover=null;
+const totalOf=(s,w)=>s*coins[0].qty+w*coins[1].qty;
+const COST=coins.reduce((a,c)=>a+c.buy*c.qty,0);
+async function loadHistory(){
+  try{const h=await (await fetch('https://raw.githubusercontent.com/jtl10231-oss/coin-total/data/history.json?t='+Date.now())).json();
+    h.SOL.forEach((v,i)=>{const t=h.t0+i*h.step;if(!series.has(t))series.set(t,totalOf(v,h.WLD[i]))});drawChart();
+  }catch(e){document.getElementById('tip').textContent='지난 기록을 불러오지 못했어요. 지금부터 쌓이는 값만 보여요.'}
+}
+function addLive(){if(coins.some(c=>c.price==null))return;const t=Math.floor(Date.now()/STEP)*STEP;series.set(t,totalOf(coins[0].price,coins[1].price));drawChart();}
+const man=v=>(v/10000).toLocaleString('ko-KR',{maximumFractionDigits:0})+'만';
+const hm=t=>{const d=new Date(t);return (range>1440?(d.getMonth()+1)+'/'+d.getDate()+' ':'')+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')};
+function pts(){const now=Date.now(),from=now-range*STEP;return [...series.entries()].filter(([t])=>t>=from).sort((a,b)=>a[0]-b[0]);}
+function drawChart(){
+  const cv=document.getElementById('chart'),dpr=window.devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight;
+  cv.width=W*dpr;cv.height=H*dpr;const g=cv.getContext('2d');g.scale(dpr,dpr);g.clearRect(0,0,W,H);
+  const p=pts();if(p.length<2){return}
+  const L=6,R=W-52,T=8,B=H-22;
+  let lo=Math.min(...p.map(x=>x[1])),hi=Math.max(...p.map(x=>x[1]));
+  if(COST>lo-(hi-lo)*0.3&&COST<hi+(hi-lo)*0.3){lo=Math.min(lo,COST);hi=Math.max(hi,COST)}
+  const pad=(hi-lo)*0.08||hi*0.001;lo-=pad;hi+=pad;
+  const t0=p[0][0],t1=p[p.length-1][0];
+  const X=t=>L+(R-L)*(t-t0)/Math.max(1,t1-t0),Y=v=>B-(B-T)*(v-lo)/(hi-lo);
+  g.font='11px -apple-system,sans-serif';g.fillStyle='#9ca3af';g.strokeStyle='#eef1f7';g.lineWidth=1;
+  for(let i=0;i<=3;i++){const v=lo+(hi-lo)*i/3,y=Y(v);g.beginPath();g.moveTo(L,y);g.lineTo(R,y);g.stroke();g.fillText(man(v),R+4,y+4);}
+  g.fillText(hm(t0),L,H-6);const e=hm(t1);g.fillText(e,R-g.measureText(e).width,H-6);
+  if(COST>lo&&COST<hi){g.setLineDash([4,4]);g.strokeStyle='#9ca3af';g.beginPath();g.moveTo(L,Y(COST));g.lineTo(R,Y(COST));g.stroke();g.setLineDash([]);g.fillStyle='#6b7280';g.fillText('본전',L+2,Y(COST)-4);}
+  const last=p[p.length-1][1],col=last>=COST?'#e11d48':'#2563eb';
+  g.strokeStyle=col;g.lineWidth=1.8;g.beginPath();p.forEach(([t,v],i)=>i?g.lineTo(X(t),Y(v)):g.moveTo(X(t),Y(v)));g.stroke();
+  let sel=p[p.length-1];
+  if(hover!=null){const tt=t0+(t1-t0)*Math.min(1,Math.max(0,(hover-L)/(R-L)));sel=p.reduce((a,b)=>Math.abs(b[0]-tt)<Math.abs(a[0]-tt)?b:a);
+    g.strokeStyle='#d1d5db';g.lineWidth=1;g.beginPath();g.moveTo(X(sel[0]),T);g.lineTo(X(sel[0]),B);g.stroke();}
+  g.fillStyle=col;g.beginPath();g.arc(X(sel[0]),Y(sel[1]),3.5,0,7);g.fill();
+  const r=(sel[1]-COST)/COST*100,d=new Date(sel[0]);
+  document.getElementById('tip').innerHTML=`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')} · <b>${won(sel[1])}</b> <span class="${r>=0?'up':'down'}">${sign(r)}${Math.abs(r).toFixed(2)}%</span>`;
+}
+const cvs=document.getElementById('chart');
+const mv=e=>{const b=cvs.getBoundingClientRect();hover=(e.touches?e.touches[0].clientX:e.clientX)-b.left;drawChart();};
+cvs.addEventListener('mousemove',mv);cvs.addEventListener('touchmove',mv,{passive:true});cvs.addEventListener('touchstart',mv,{passive:true});
+['mouseleave','touchend'].forEach(ev=>cvs.addEventListener(ev,()=>{hover=null;drawChart()}));
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));b.classList.add('on');range=+b.dataset.m;drawChart();});
+window.addEventListener('resize',drawChart);
+loadHistory();setInterval(loadHistory,5*60000);
 connect();
 </script></body></html>
