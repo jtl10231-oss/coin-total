@@ -1,34 +1,40 @@
 name: collect-coinone
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 permissions:
   contents: write
-concurrency:
-  group: collect
-  cancel-in-progress: false
+  actions: write
 jobs:
   collect:
     runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: collect
+      - name: watchdog (scheduled)
+        if: github.event_name == 'schedule'
         run: |
-          git fetch origin data || true
-          node collect.mjs /tmp/history.json
-          node forecast.mjs /tmp/forecast.json || true
-      - name: publish to data branch
+          running=$(gh run list -R "$GITHUB_REPOSITORY" --workflow collect.yml --event workflow_dispatch --status in_progress --json databaseId --jq 'length')
+          queued=$(gh run list -R "$GITHUB_REPOSITORY" --workflow collect.yml --event workflow_dispatch --status queued --json databaseId --jq 'length')
+          echo "running=$running queued=$queued"
+          bash publish.sh || true
+          if [ "$running" = "0" ] && [ "$queued" = "0" ]; then gh workflow run collect.yml -R "$GITHUB_REPOSITORY" --ref main; fi
+      - name: collect every minute (about 5h40m)
+        if: github.event_name == 'workflow_dispatch'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout --orphan data-new
-          git rm -rf -q --cached .
-          cp /tmp/history.json history.json
-          git add history.json
-          if [ -f /tmp/forecast.json ]; then cp /tmp/forecast.json forecast.json; git add forecast.json; fi
-          git commit -q -m "history update"
-          git push -f origin data-new:data
+          end=$(( $(date +%s) + 340*60 ))
+          while [ "$(date +%s)" -lt "$end" ]; do
+            start=$(date +%s)
+            bash publish.sh || echo "publish failed, retry next minute"
+            took=$(( $(date +%s) - start ))
+            if [ "$took" -lt 60 ]; then sleep $(( 60 - took )); fi
+          done
+      - name: start next run
+        if: always() && github.event_name == 'workflow_dispatch'
+        run: gh workflow run collect.yml -R "$GITHUB_REPOSITORY" --ref main
