@@ -36,7 +36,8 @@ table.fc{width:100%;border-collapse:collapse;font-size:13px}
 table.fc th{color:#6b7280;font-weight:600;text-align:right;padding:6px 4px;border-bottom:1px solid #eef1f7}
 table.fc th:first-child,table.fc td:first-child{text-align:left}
 table.fc td{text-align:right;padding:8px 4px;border-bottom:1px solid #f4f6fa;vertical-align:top}
-table.fc td b{font-size:14px}.rng{display:block;font-size:11px;color:#9ca3af;margin-top:2px}
+table.fc td b{font-size:14px}
+table.fc tr.grp td{font-weight:700;color:#1a1f36;background:#f7f8fb;padding:6px 6px;font-size:13px}.rng{display:block;font-size:11px;color:#9ca3af;margin-top:2px}
 .news h4{margin:12px 0 6px;font-size:14px}.news h4:first-child{margin-top:0}
 .news a{display:block;color:#1a1f36;text-decoration:none;font-size:14px;line-height:1.45;padding:6px 0;border-top:1px solid #f4f6fa}
 .news a span{display:block;font-size:11px;color:#9ca3af;margin-top:2px}
@@ -51,9 +52,9 @@ table.fc td b{font-size:14px}.rng{display:block;font-size:11px;color:#9ca3af;mar
 <canvas id="chart"></canvas><div class="tip" id="tip">기록 불러오는 중...</div></div>
 <div id="list"></div>
 <div class="card"><div class="sec-title">센티멘트 <span class="muted" id="fcTime"></span></div><div id="senti">불러오는 중...</div></div>
-<div class="card"><div class="sec-title">가격 예측 <span class="muted">중앙값 · 68% 범위</span></div><div id="fc">불러오는 중...</div></div>
+<div class="card"><div class="sec-title">가격 예측 <span class="muted">긍정 · 중간 · 나쁨</span></div><div id="fc">불러오는 중...</div></div>
 <div class="card news"><div class="sec-title">주요 뉴스 <span class="muted">최근 3일</span></div><div id="news">불러오는 중...</div></div>
-<div class="note">센티멘트는 공포·탐욕 지수, 7일 추세, RSI, CoinGecko 투표, 시가총액 변화를 0~100점으로 합친 값이에요. 예측은 최근 90일 코인원 일별 변동폭으로 범위를 잡고, 센티멘트(코인 60% + 시장 40%)로 중앙값을 조금만 기울인 통계 추정이에요. 실제 가격이 범위 안에 들어올 확률은 약 68%로 가정하며, 투자 조언이 아니에요. 1시간마다 갱신돼요.</div>
+<div class="note">센티멘트는 공포·탐욕 지수, 7일 추세, RSI, CoinGecko 투표, 시가총액 변화를 0~100점으로 합친 값이에요. 예측은 최근 90일 코인원 일별 변동폭을 기준으로 한 통계 추정이에요. 중간은 센티멘트(코인 60% + 시장 40%)로 조금 기울인 값이고, 긍정·나쁨은 그보다 표준편차 1만큼 오르거나 내린 경우예요(이 사이에 들어올 확률을 약 68%로 가정). 총액은 두 코인이 같은 시나리오로 움직인다고 보고 계산했어요. 투자 조언이 아니에요. 1시간마다 갱신돼요.</div>
 <div class="err" id="err"></div>
 </div>
 <script>
@@ -152,11 +153,12 @@ async function loadForecast(){
     document.getElementById('senti').innerHTML=sentiRow('코인 시장 전반',f.market)+sentiRow('솔라나',f.SOL.sentiment)+sentiRow('월드코인',f.WLD.sentiment);
     const lab={1:'1일 후',3:'3일 후',7:'7일 후',14:'2주 후'};
     const rate=v=>`<span class="${v>=0?'up':'down'}">${sign(v)}${Math.abs(v).toFixed(1)}%</span>`;
-    document.getElementById('fc').innerHTML=`<table class="fc"><tr><th>기간</th><th>솔라나</th><th>월드코인</th><th>총 평가금액</th></tr>`+
-      f.forecast.map(x=>`<tr><td>${lab[x.days]}</td>
-      <td><b>${fmtW(r100(x.SOL.mid))}</b><span class="rng">${r100(x.SOL.low).toLocaleString('ko-KR')}~${r100(x.SOL.high).toLocaleString('ko-KR')}</span></td>
-      <td><b>${fmtW(r1(x.WLD.mid))}</b><span class="rng">${r1(x.WLD.low).toLocaleString('ko-KR')}~${r1(x.WLD.high).toLocaleString('ko-KR')}</span></td>
-      <td><b>${fmtW(r1000(x.TOTAL.mid))}</b> ${rate(x.TOTAL.midRate)}<span class="rng">${rate(x.TOTAL.lowRate)} ~ ${rate(x.TOTAL.highRate)}</span></td></tr>`).join('')+`</table>`;
+    const Q={SOL:coins[0].qty,WLD:coins[1].qty};
+    const sc=[['긍정','high','up'],['중간','mid',''],['나쁨','low','down']];
+    document.getElementById('fc').innerHTML=`<table class="fc"><tr><th>시나리오</th><th>솔라나</th><th>월드코인</th><th>총액 (수익률)</th></tr>`+
+      f.forecast.map(x=>`<tr class="grp"><td colspan="4">${lab[x.days]}</td></tr>`+sc.map(([nm,k,cl])=>{
+        const sp=r100(x.SOL[k]),wp=r1(x.WLD[k]),tot=r1000(sp*Q.SOL+wp*Q.WLD),rt=(tot-COST)/COST*100;
+        return `<tr><td><span class="${cl}">${nm}</span></td><td>${fmtW(sp)}</td><td>${fmtW(wp)}</td><td><b>${fmtW(tot)}</b> ${rate(rt)}</td></tr>`}).join('')).join('')+`</table>`;
     const nl=(arr)=>arr.length?arr.map(n=>`<a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}<span>${esc(n.source)} · ${ago(n.date)}</span></a>`).join(''):'<div class="muted">최근 3일 뉴스가 없어요.</div>';
     document.getElementById('news').innerHTML=`<h4>솔라나</h4>${nl(f.news?.SOL||[])}<h4>월드코인</h4>${nl(f.news?.WLD||[])}`;
   }catch(e){['senti','fc','news'].forEach(id=>document.getElementById(id).textContent='아직 계산된 데이터가 없어요. 잠시 후 다시 확인해 주세요.')}
