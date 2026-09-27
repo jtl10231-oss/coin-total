@@ -18,7 +18,7 @@ h1{font-size:20px;margin:0 0 4px}.sub{color:#6b7280;font-size:13px;margin-bottom
 <h1>코인원 기준 보유 코인 총액</h1>
 <div class="sub">코인원 원화 마켓 현재가 · 실시간 갱신 · <span id="time">연결 중...</span></div>
 <div class="card total"><div class="label">총 평가금액</div><div class="v" id="total">불러오는 중...</div>
-<div class="pl"><span>매수금액 <span id="cost"></span> 대비</span><span><b id="rate2">-</b> <span id="profit2"></span></span></div></div>
+<div class="pl"><span>수익률</span><span><b id="rate2">-</b> <span id="profit2"></span></span></div></div>
 <div id="list"></div>
 <div class="err" id="err"></div>
 </div>
@@ -41,7 +41,6 @@ function render(){
     const cost=c.buy*c.qty,gp=v-cost,gr=gp/cost*100,g=document.getElementById('g-'+c.sym);
     g.textContent=sign(gr)+Math.abs(gr).toFixed(2)+'% ('+sign(gp)+won(Math.abs(gp))+')';g.className=gr>=0?'up':'down';});
   const tc=coins.reduce((a,c)=>a+c.buy*c.qty,0),p2=sum-tc,pr2=p2/tc*100;
-  document.getElementById('cost').textContent=won(tc);
   document.getElementById('rate2').textContent=sign(pr2)+Math.abs(pr2).toFixed(2)+'%';
   document.getElementById('profit2').textContent='('+sign(p2)+won(Math.abs(p2))+')';
   document.getElementById('total').textContent=won(sum);
