@@ -32,6 +32,9 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         env:
           RUNWAY_DISPATCH_TOKEN: ${{ secrets.RUNWAY_DISPATCH_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PRICE_ALERT: '1'
         run: |
           end=$(( $(date +%s) + 340*60 ))
           while [ "$(date +%s)" -lt "$end" ]; do
