@@ -1,9 +1,9 @@
 /* 쮸앤택 Runway 화면 동작 */
 (function () {
 'use strict';
-var OWNER = 'jtl10231-oss', REPO = 'runway-data', FILE = 'ledger.json';
+var API = 'https://script.google.com/macros/s/AKfycbxVJypN_d3BeLrL3-y1Z453t95wdB3xRlRg72umD_-phS1Beq1sVVFB4Ay-sbSYR_6Wmg/exec'; // 구글 Apps Script 중계 서버 (열쇠는 서버에만 있음)
 var C = window.RunwayCore;
-var TOKEN = null, ME = null, LEDGER = null, SHA = null, STATE = null, PRICES = { SOL: null, WLD: null }, PRICE_AT = null;
+var ME = null, LEDGER = null, SHA = null, PRICES = { SOL: null, WLD: null }, PRICE_AT = null;
 var TAB = 'home', RECTYPE = 'sale', rendering = false, histLimit = 30;
 var $ = function (s) { return document.querySelector(s); };
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -18,32 +18,25 @@ function nowIso() { return new Date().toISOString(); }
 
 var enc = new TextEncoder(), dec = new TextDecoder();
 
-// ---------- GitHub 저장소 읽기/쓰기 ----------
-function b64enc(str) { var bytes = enc.encode(str), bin = ''; for (var i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(bin); }
-function b64dec(b64) { var bin = atob(b64.replace(/\s/g, '')), o = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) o[i] = bin.charCodeAt(i); return dec.decode(o); }
-async function gh(method, path, body, tok) {
-  var h = { Authorization: 'Bearer ' + (tok || TOKEN), Accept: 'application/vnd.github+json' };
-  if (body) h['Content-Type'] = 'application/json';
-  return fetch('https://api.github.com/repos/' + OWNER + '/' + REPO + path, { method: method, headers: h, body: body ? JSON.stringify(body) : undefined, cache: 'no-store' });
-}
-async function readFile(name, tok) {
-  var r = await gh('GET', '/contents/' + name + '?ref=main', null, tok);
-  if (r.status === 401 || r.status === 403) { var e = new Error('AUTH'); e.auth = true; throw e; }
-  if (r.status === 404) return null;
-  if (!r.ok) throw new Error('불러오기 실패 (HTTP ' + r.status + ')');
+// ---------- 기록 읽기/쓰기 (중계 서버) ----------
+async function readLedger() {
+  var r = await fetch(API + '?t=' + Date.now(), { cache: 'no-store' });
   var j = await r.json();
-  return { data: JSON.parse(b64dec(j.content)), sha: j.sha };
+  if (!j.ok) throw new Error('불러오기 실패' + (j.status ? ' (HTTP ' + j.status + ')' : ''));
+  try { localStorage.setItem('runway.cache', JSON.stringify({ data: j.data, sha: j.sha, at: Date.now() })); } catch (e) {}
+  return { data: j.data, sha: j.sha };
 }
 async function save(mutate, msg) {
   for (var i = 0; i < 4; i++) {
-    var cur = await readFile(FILE);
+    var cur = await readLedger();
     var next = JSON.parse(JSON.stringify(cur.data));
     mutate(next);
     next.updatedAt = nowIso();
-    var r = await gh('PUT', '/contents/' + FILE, { message: msg + ' (' + ME + ')', content: b64enc(JSON.stringify(next, null, 1)), sha: cur.sha, branch: 'main' });
-    if (r.ok) { var j = await r.json(); LEDGER = next; SHA = j.content.sha; return true; }
-    if (r.status === 401 || r.status === 403) throw new Error('열쇠 권한이 없어요 (HTTP ' + r.status + ')');
-    if (r.status !== 409 && r.status !== 422) throw new Error('저장 실패 (HTTP ' + r.status + ')');
+    var r = await fetch(API, { method: 'POST', body: JSON.stringify({ content: JSON.stringify(next, null, 1), sha: cur.sha, message: msg + ' (' + ME + ')' }) });
+    var j = await r.json();
+    if (j.ok) { LEDGER = next; SHA = j.sha; try { localStorage.setItem('runway.cache', JSON.stringify({ data: next, sha: j.sha, at: Date.now() })); } catch (e) {} return true; }
+    if (j.error === 'records cannot shrink') throw new Error('기록은 지울 수 없어요 (취소만 돼요)');
+    if (j.status !== 409 && j.status !== 422) throw new Error('저장 실패' + (j.status ? ' (HTTP ' + j.status + ')' : j.error ? ' (' + j.error + ')' : ''));
     await sleep(500 * (i + 1));
   }
   throw new Error('동시에 저장이 겹쳤어요. 잠시 후 다시 해 주세요.');
@@ -83,31 +76,17 @@ function queueHome() {
   setTimeout(function () { homeQueued = false; renderHome(); }, Math.max(0, 1500 - (Date.now() - lastHome)));
 }
 
-// ---------- 열기: 로그인 없음 (공유 링크를 한 번 열면 이 기기에 저장) ----------
+// ---------- 열기: 로그인 없이 바로 쮸/택 선택 (한 번 고르면 이 기기에 저장) ----------
 function showLock(html) { $('#app').hidden = true; var l = $('#lock'); l.hidden = false; l.innerHTML = '<div class="lockcard">' + html + '</div>'; }
-function shareUrl() { return location.origin + location.pathname + '#k=' + encodeURIComponent(TOKEN); }
+function pageUrl() { return location.origin + location.pathname; }
 function showPick() {
-  showLock('<h2>누구세요?</h2><div class="sub">한 번 고르면 이 기기에 저장돼요. 나중에 설정에서 바꿀 수 있어요.</div><div class="pick"><button class="btn" data-me="택">택</button><button class="btn" data-me="쮸">쮸</button></div>');
+  showLock('<h2>누구세요?</h2><div class="sub">한 번 고르면 이 기기에 저장돼요. 나중에 설정에서 바꿀 수 있어요.</div><div class="pick"><button class="btn" data-me="쮸">쮸</button><button class="btn" data-me="택">택</button></div>');
   document.querySelectorAll('[data-me]').forEach(function (b) { b.onclick = function () { localStorage.setItem('runway.me', b.dataset.me); ME = b.dataset.me; start(); }; });
 }
-function showNoKey() {
-  showLock('<h2>공유 링크로 열어 주세요</h2><div class="sub">런웨이는 로그인 없이 <b>공유 링크</b>로 열어요. 이미 쓰고 있는 기기의 <b>설정 → 공유 링크</b>에서 링크를 받거나 QR을 찍어 주세요. 한 번 열면 이 기기에서는 계속 바로 열려요.</div>' +
-    '<details style="margin-top:16px"><summary class="muted" style="font-size:13px">링크 직접 붙여넣기</summary><textarea id="rawtok" placeholder="https://...#k=..."></textarea><button class="btn gray" id="rawgo">열기</button></details>');
-  $('#rawgo').onclick = function () {
-    var t = $('#rawtok').value.trim(), m = t.match(/[#&]k=([^&\s]+)/); if (m) t = decodeURIComponent(m[1]);
-    if (!/^github_pat_/.test(t)) return toast('공유 링크가 아니에요');
-    localStorage.setItem('runway.key', t); boot();
-  };
-}
 function boot() {
-  var hp = new URLSearchParams(location.hash.slice(1)), k = hp.get('k');
-  if (k) { localStorage.setItem('runway.key', k); history.replaceState(null, '', location.pathname); }
-  var old = localStorage.getItem('runway.bootstrap') || sessionStorage.getItem('runway.tok'); // 예전 방식 정리
-  if (old && !localStorage.getItem('runway.key')) localStorage.setItem('runway.key', old);
-  try { var st = JSON.parse(localStorage.getItem('runway.enc') || 'null'); if (st && st.person && !localStorage.getItem('runway.me')) localStorage.setItem('runway.me', st.person); } catch (e) {}
-  ['runway.bootstrap', 'runway.enc'].forEach(function (x) { localStorage.removeItem(x); }); sessionStorage.removeItem('runway.tok');
-  TOKEN = localStorage.getItem('runway.key');
-  if (!TOKEN) return showNoKey();
+  // 예전 방식(열쇠·PIN) 흔적은 이 기기에서 지움
+  ['runway.key', 'runway.bootstrap', 'runway.enc'].forEach(function (x) { localStorage.removeItem(x); }); sessionStorage.removeItem('runway.tok');
+  if (location.hash) history.replaceState(null, '', location.pathname);
   ME = localStorage.getItem('runway.me');
   if (ME !== '택' && ME !== '쮸') return showPick();
   start();
@@ -116,20 +95,15 @@ function boot() {
 // ---------- 앱 시작 ----------
 async function start() {
   $('#lock').hidden = true; $('#app').hidden = false;
-  $('#tab-home').innerHTML = '<div class="card sub">불러오는 중...</div>';
-  try {
-    var f = await readFile(FILE);
-    LEDGER = f.data; SHA = f.sha;
-  } catch (e) {
-    if (e.auth) { showLock('<h2>공유 링크가 바뀌었어요</h2><div class="sub">링크가 만료되었거나 새 링크로 바뀌었어요. 새 공유 링크로 다시 열어 주세요.</div><button class="btn gray" onclick="localStorage.removeItem(\'runway.key\');location.reload()">이 기기에서 지우고 다시 열기</button>'); return; }
-    $('#tab-home').innerHTML = '<div class="card">불러오지 못했어요: ' + esc(e.message) + '</div>'; return;
-  }
-  readFile('state.json').then(function (s) { STATE = s ? s.data : null; if (TAB === 'set') renderSet(); }).catch(function () {});
+  var cached = null; try { cached = JSON.parse(localStorage.getItem('runway.cache') || 'null'); } catch (e) {}
+  if (cached && cached.data) { LEDGER = cached.data; SHA = cached.sha; renderAll(); }
+  else $('#tab-home').innerHTML = '<div class="card sub">불러오는 중...</div>';
   if (!wsStarted) { wsStarted = true; connectWS(); seedPrices(); }
-  renderAll();
+  try { var f = await readLedger(); LEDGER = f.data; SHA = f.sha; renderAll(); }
+  catch (e) { if (!LEDGER) $('#tab-home').innerHTML = '<div class="card">불러오지 못했어요: ' + esc(e.message) + ' <button class="mini" onclick="location.reload()">다시</button></div>'; else toast('최신 기록을 못 불러왔어요. 잠시 후 다시 시도해요'); }
   setInterval(async function () { // 다른 사람이 입력한 기록 반영 (2분마다)
     if (document.hidden) return;
-    try { var f = await readFile(FILE); if (f && f.sha !== SHA) { LEDGER = f.data; SHA = f.sha; if (TAB === 'home') renderHome(); else if (!document.activeElement || !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) renderAll(); } } catch (e) {}
+    try { var f = await readLedger(); if (f && f.sha !== SHA) { LEDGER = f.data; SHA = f.sha; if (TAB === 'home') renderHome(); else if (!document.activeElement || !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) renderAll(); } } catch (e) {}
   }, 120000);
 }
 document.querySelectorAll('.bottom button').forEach(function (b) {
@@ -451,14 +425,12 @@ function renderSet() {
   h += '<label class="f">하루 부족액 증가 알림 (원)</label><input id="a_dw" inputmode="numeric" value="' + (+A.dropWarn).toLocaleString('ko-KR') + '">';
   h += '<label class="f">상대방에게 바로 알릴 금액 (원 이상)</label><input id="a_big" inputmode="numeric" value="' + (+A.bigRecord).toLocaleString('ko-KR') + '">';
   h += '<button class="btn" id="a_save">알림 기준 저장</button>';
-  var st = STATE || {};
-  h += '<div class="hint">마지막 알림 점검: ' + (st.lastRun ? new Date(st.lastRun).toLocaleString('ko-KR') : '아직 없음') + ' · 텔레그램: ' + (st.telegram ? '연결됨' : '아직 연결 안 됨') + '</div></div>';
+  h += '<div class="hint">위 기준은 이 화면 위쪽 경고에 쓰여요. 텔레그램으로는 코인 급변 알림만 가요.</div></div>';
   h += '<div class="card"><h3>나와 공유</h3>';
   h += '<div class="row"><span class="k">이 기기 사용자</span><span class="v">' + esc(ME) + ' <button class="mini" id="d_me">바꾸기</button></span></div>';
-  h += '<div class="sub" style="margin-top:8px">여자친구분 휴대폰이나 새 기기는 공유 링크를 보내거나 QR을 찍게 하면 돼요. 로그인 없이 바로 열리고, 처음 한 번만 택/쮸를 골라요.</div>';
-  h += '<button class="btn" id="d_copy">공유 링크 복사</button><button class="btn gray" id="d_qr">QR 보기</button><div id="d_out"></div>';
-  h += '<div class="hint">이 링크를 가진 사람은 누구나 보고 기록할 수 있어요. 두 분만 가지고 있어 주세요. 링크가 새면 새 링크로 바꿀 수 있어요.</div>';
-  h += '<button class="btn red" id="d_forget">이 기기에서 런웨이 지우기</button></div>';
+  h += '<div class="sub" style="margin-top:8px">이 주소를 열면 로그인 없이 바로 쮸/택을 고르고 쓸 수 있어요.</div>';
+  h += '<button class="btn" id="d_copy">주소 복사</button><button class="btn gray" id="d_qr">QR 보기</button><div id="d_out"></div>';
+  h += '<div class="hint">주소를 아는 사람은 누구나 보고 기록할 수 있어요. 기록은 지워지지 않고 취소만 돼서, 잘못 들어가도 되돌릴 수 있어요.</div></div>';
   h += '<div class="card"><h3>데이터</h3><div class="sub">모든 기록은 비공개 저장소(runway-data)에 저장되고, 바뀔 때마다 변경 이력이 남아요.</div><button class="btn gray" id="x_dl">기록 파일 내려받기 (백업)</button></div>';
   $('#tab-set').innerHTML = h;
   var v = function (id) { var el = $('#' + id); return el ? el.value : ''; };
@@ -494,9 +466,8 @@ function renderSet() {
     doSave(function (L) { L.settings.alert = Object.assign(L.settings.alert || {}, na); }, '알림 기준 변경', '알림 기준을 저장했어요');
   };
   $('#d_me').onclick = function () { var other = ME === '택' ? '쮸' : '택'; if (confirm('이 기기 사용자를 ' + other + '(으)로 바꿀까요?')) { localStorage.setItem('runway.me', other); ME = other; toast('이제 ' + other + '(으)로 기록돼요'); renderSet(); } };
-  $('#d_copy').onclick = function () { navigator.clipboard.writeText(shareUrl()).then(function () { toast('공유 링크를 복사했어요'); }, function () { prompt('아래 링크를 복사해 주세요', shareUrl()); }); };
-  $('#d_qr').onclick = function () { var q = qrcode(0, 'M'); q.addData(shareUrl()); q.make(); $('#d_out').innerHTML = '<div class="qr">' + q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }) + '</div><div class="hint">휴대폰 카메라로 찍으면 바로 열려요. 다 찍으면 설정 화면을 벗어나 주세요.</div>'; };
-  $('#d_forget').onclick = function () { if (confirm('이 기기에서 런웨이를 지울까요? 다시 보려면 공유 링크가 필요해요.')) { localStorage.removeItem('runway.key'); localStorage.removeItem('runway.me'); location.reload(); } };
+  $('#d_copy').onclick = function () { navigator.clipboard.writeText(pageUrl()).then(function () { toast('주소를 복사했어요'); }, function () { prompt('아래 주소를 복사해 주세요', pageUrl()); }); };
+  $('#d_qr').onclick = function () { var q = qrcode(0, 'M'); q.addData(pageUrl()); q.make(); $('#d_out').innerHTML = '<div class="qr">' + q.createSvgTag({ cellSize: 5, margin: 2, scalable: true }) + '</div><div class="hint">휴대폰 카메라로 찍으면 바로 열려요.</div>'; };
   $('#x_dl').onclick = function () { var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(LEDGER, null, 1)], { type: 'application/json' })); a.download = 'runway-ledger-' + today() + '.json'; a.click(); };
 }
 
