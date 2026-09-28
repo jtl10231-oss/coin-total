@@ -41,9 +41,13 @@ async function save(mutate, msg) {
   }
   throw new Error('동시에 저장이 겹쳤어요. 잠시 후 다시 해 주세요.');
 }
+var saving = false;
 async function doSave(mutate, msg, okText) {
+  if (saving) { toast('저장 중이에요. 잠시만요'); return false; }
+  saving = true; toast('저장 중...');
   try { await save(mutate, msg); toast(okText || '저장했어요'); renderAll(); return true; }
   catch (e) { toast(e.message || '저장 실패'); return false; }
+  finally { saving = false; }
 }
 
 // ---------- 시세 (코인원) ----------
@@ -139,7 +143,8 @@ function renderHome() {
   h += '<div class="row total"><span class="k">합계</span><span class="v">' + (havePx ? won(r.pool) : '-') + '</span></div>';
   h += '<div class="sub">현금화 누계 ' + won(r.cashed) + ' · 법인 잔액 ' + won(r.corp) + '은 회사 쪽으로 따로 봐요</div></div>';
   // 2 목표자금
-  h += '<div class="card"><h3>2. 1년 목표자금 <small>예산 ' + man(S.budgets.life) + ' + ' + man(S.budgets.personal) + ' + ' + man(S.budgets.company) + '</small></h3>';
+  var bNames = [['life', '생활'], ['personal', '개인'], ['company', '회사']].filter(function (b) { return +S.budgets[b[0]] > 0; });
+  h += '<div class="card"><h3>2. 1년 목표자금 <small>' + bNames.map(function (b) { return b[1] + ' ' + man(S.budgets[b[0]]); }).join(' + ') + '</small></h3>';
   var recN = (S.recurring || []).filter(function (c) { return c && +c.amount > 0; });
   h += '<div class="row"><span class="k">현재 자산 (코인+현금)</span><span class="v">' + (havePx ? won(r.pool) : '-') + '</span></div>';
   h += '<div class="row"><span class="k">앞으로 들어올 입금' + (recN.length ? ' (' + recN.map(function (c) { return esc(c.who) + ' 월 ' + man(c.amount); }).join(', ') + ' × ' + r.expected.length + '번)' : '') + '</span><span class="v">' + won(r.expectedFuture) + '</span></div>';
@@ -153,6 +158,7 @@ function renderHome() {
   h += '<div class="card"><h3>3. 용도별 남은 예산</h3>';
   [['life', '생활 (공동)', 'var(--life)'], ['personal', '개인 (택)', 'var(--personal)'], ['company', '회사', 'var(--company)']].forEach(function (b) {
     var tot = +S.budgets[b[0]] || 0, rem = r.remaining[b[0]], p = tot ? Math.max(0, rem) / tot : 0;
+    if (!tot && !r.used[b[0]]) return;
     h += '<div class="bucket"><div class="top"><span><i class="dot" style="background:' + b[2] + '"></i><b>' + b[1] + '</b></span><span><b class="' + (rem < 0 ? 'bad' : '') + '">' + won(rem) + '</b> <span class="muted">/ ' + man(tot) + '</span></span></div>';
     h += '<div class="bar"><i style="width:' + (p * 100) + '%;background:' + b[2] + '"></i></div><div class="sub">사용 ' + won(r.used[b[0]]) + ' · 남은 비율 ' + Math.round(p * 100) + '%</div></div>';
   });
@@ -165,11 +171,11 @@ function renderHome() {
   h += '<div class="row"><span class="k">이번 달 공금통장 입금</span><span class="v">택 ' + won(tm.jointBy['택'] || 0) + ' · 쮸 ' + won(tm.jointBy['쮸'] || 0) + '</span></div>';
   (r.contribNow || []).forEach(function (c) { h += '<div class="row"><span class="k">' + esc(c.who) + ' 정기 입금 (' + (+c.due.slice(8)) + '일 ' + won(c.amount) + ')</span><span class="v ' + (c.left > 0 ? 'warnc' : 'good') + '">' + (c.left > 0 ? (c.got > 0 ? won(c.left) + ' 남음' : '아직') : '들어옴') + '</span></div>'; });
   h += '<div class="row"><span class="k">생활비 (공금통장으로 간 돈, 한도 ' + won(ml) + ')</span><span class="v">' + won(tm.life) + '</span></div>';
-  h += '<div class="row"><span class="k">카드값 (한도 ' + won(mp) + ')</span><span class="v">' + won(tm.card) + '</span></div>';
+  if (mp || tm.card) h += '<div class="row"><span class="k">카드값' + (mp ? ' (한도 ' + won(mp) + ')' : '') + '</span><span class="v">' + won(tm.card) + '</span></div>';
   if (tm.expense) h += '<div class="row"><span class="k">기타 지출</span><span class="v">' + won(tm.expense) + '</span></div>';
-  h += '<div class="row"><span class="k">회사 사용액</span><span class="v">' + won(tm.corpSpend) + '</span></div>';
+  if (+S.budgets.company || tm.corpSpend) h += '<div class="row"><span class="k">회사 사용액</span><span class="v">' + won(tm.corpSpend) + '</span></div>';
   h += '<div class="row total"><span class="k">이번 달 총 소진</span><span class="v">' + won(tm.total) + '</span></div>';
-  h += '<div class="sub">생활 ' + (ml ? Math.round(tm.life / ml * 100) : 0) + '% · 개인 ' + (mp ? Math.round(tm.personal / mp * 100) : 0) + '% 사용 (월 한도 대비). 공금통장에 들어간 돈은 누가 넣었든 생활비로 잡혀요. 정기 입금 예정분은 확보 자금에 미리 들어가 있어요.</div></div>';
+  h += '<div class="sub">생활 ' + (ml ? Math.round(tm.life / ml * 100) : 0) + '%' + (mp ? ' · 개인 ' + Math.round(tm.personal / mp * 100) + '%' : '') + ' 사용 (월 한도 대비). 공금통장에 들어간 돈은 누가 넣었든 생활비로 잡혀요. 정기 입금 예정분은 확보 자금에 미리 들어가 있어요.</div></div>';
   // 5 런웨이
   var p = r.plan;
   h += '<div class="card"><h3>5. 남은 런웨이 <small>계획대로 쓰면</small></h3>';
@@ -178,8 +184,9 @@ function renderHome() {
     if (p.exhaust) h += '<div class="sub">' + (p.survives ? '목표일(' + S.targetDate + ')은 버티고 ' : '') + '<b>' + p.exhaust + '</b>에 바닥나요' + (p.atTarget != null ? ' · 목표일에 남는 돈 ' + won(p.atTarget) : '') + '</div>';
     else h += '<div class="sub">5년 넘게 버텨요' + (p.atTarget != null ? ' · 목표일에 남는 돈 ' + won(p.atTarget) : '') + '</div>';
     h += '<div class="row" style="margin-top:8px"><span class="k">최근 소비 속도면</span><span class="v">' + (r.pace ? C.monthsText(r.pace.months) + ' (월 ' + won(r.paceL) + ')' : '한 달 기록이 쌓이면 계산') + '</span></div>';
-    h += '<div class="row"><span class="k">회사 돈을 떼어 두면 생활비</span><span class="v">' + (r.lifeMonths == null ? '-' : C.monthsText(Math.max(0, r.lifeMonths))) + '</span></div>';
-    h += '<div class="row"><span class="k">회사 런웨이</span><span class="v">' + (r.corpMonths == null ? '회사 사용액 기록 필요' : C.monthsText(r.corpMonths)) + '</span></div>';
+    var hasCorp = +S.budgets.company > 0 || r.corp > 0 || r.corpAvg;
+    if (hasCorp && r.companyLeft > 0) h += '<div class="row"><span class="k">회사 돈을 떼어 두면 생활비</span><span class="v">' + (r.lifeMonths == null ? '-' : C.monthsText(Math.max(0, r.lifeMonths))) + '</span></div>';
+    if (hasCorp) h += '<div class="row"><span class="k">회사 런웨이</span><span class="v">' + (r.corpMonths == null ? '회사 사용액 기록 필요' : C.monthsText(r.corpMonths)) + '</span></div>';
     if (r.expectedFuture > 0) h += '<div class="hint">앞으로 들어올 정기 입금 ' + won(r.expectedFuture) + '을 넣어서 계산했어요.</div>';
     if (r.reserveNow > 0) h += '<div class="hint">날짜를 안 정한 회사 준비금 ' + won(r.reserveNow) + '은 바로 빠진다고 보고 계산했어요. 날짜가 정해지면 기록 → 예정 출금에 넣어 주세요.</div>';
   }
