@@ -141,7 +141,7 @@ function renderHome() {
   ['SOL', 'WLD'].forEach(function (c) { h += '<div class="row"><span class="k">' + c + ' ' + n2(r.hold[c]) + '개 × ' + (PRICES[c] != null ? won(PRICES[c]) : '-') + '</span><span class="v">' + (havePx ? won(r.coinVal[c]) : '-') + '</span></div>'; });
   h += '<div class="row"><span class="k">현금(원화)</span><span class="v ' + (r.cash < 0 ? 'bad' : '') + '">' + won(r.cash) + '</span></div>';
   h += '<div class="row total"><span class="k">합계</span><span class="v">' + (havePx ? won(r.pool) : '-') + '</span></div>';
-  h += '<div class="sub">현금화 누계 ' + won(r.cashed) + ' · 법인 잔액 ' + won(r.corp) + '은 회사 쪽으로 따로 봐요</div></div>';
+  h += '<div class="sub">현금화 누계 ' + won(r.cashed) + ((+S.budgets.company > 0 || r.corp) ? ' · 법인 잔액 ' + won(r.corp) + '은 회사 쪽으로 따로 봐요' : '') + '</div></div>';
   // 2 목표자금
   var bNames = [['life', '생활'], ['personal', '개인'], ['company', '회사']].filter(function (b) { return +S.budgets[b[0]] > 0; });
   h += '<div class="card"><h3>2. 1년 목표자금 <small>' + bNames.map(function (b) { return b[1] + ' ' + man(S.budgets[b[0]]); }).join(' + ') + '</small></h3>';
