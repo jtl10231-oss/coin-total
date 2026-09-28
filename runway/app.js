@@ -16,25 +16,7 @@ function uid() { return Date.now().toString(36) + Math.random().toString(36).sli
 function today() { return C.kstToday(); }
 function nowIso() { return new Date().toISOString(); }
 
-// ---------- 암호화 (열쇠를 PIN/등록 암호로 잠금) ----------
 var enc = new TextEncoder(), dec = new TextDecoder();
-function toB64u(bytes) { var s = ''; for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
-function fromB64u(s) { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; var b = atob(s), o = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) o[i] = b.charCodeAt(i); return o; }
-async function keyFrom(pass, salt) {
-  var k = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']);
-  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: salt, iterations: 250000, hash: 'SHA-256' }, k, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
-}
-async function seal(text, pass) {
-  var salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
-  var ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, await keyFrom(pass, salt), enc.encode(text)));
-  var out = new Uint8Array(28 + ct.length); out.set(salt, 0); out.set(iv, 16); out.set(ct, 28);
-  return toB64u(out);
-}
-async function unseal(blob, pass) {
-  var b = fromB64u(blob);
-  var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b.slice(16, 28) }, await keyFrom(pass, b.slice(0, 16)), b.slice(28));
-  return dec.decode(pt);
-}
 
 // ---------- GitHub 저장소 읽기/쓰기 ----------
 function b64enc(str) { var bytes = enc.encode(str), bin = ''; for (var i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(bin); }
@@ -101,83 +83,34 @@ function queueHome() {
   setTimeout(function () { homeQueued = false; renderHome(); }, Math.max(0, 1500 - (Date.now() - lastHome)));
 }
 
-// ---------- 잠금 화면 ----------
-function personPicker(name) {
-  return '<label class="f">나는</label><div class="seg"><label><input type="radio" name="' + name + '" value="택"><span>택</span></label><label><input type="radio" name="' + name + '" value="쮸"><span>쮸</span></label></div>';
-}
-function pinFields() {
-  return '<label class="f">PIN 만들기 (숫자 4자리 이상)</label><input id="pin1" type="password" inputmode="numeric" autocomplete="new-password">' +
-    '<label class="f">PIN 한 번 더</label><input id="pin2" type="password" inputmode="numeric" autocomplete="new-password">';
-}
-function checkPins() {
-  var a = $('#pin1').value.trim(), b = $('#pin2').value.trim();
-  if (!/^\d{4,}$/.test(a)) { toast('PIN은 숫자 4자리 이상이에요'); return null; }
-  if (a !== b) { toast('PIN이 서로 달라요'); return null; }
-  return a;
-}
-function pickedPerson(name) { var el = document.querySelector('input[name="' + name + '"]:checked'); return el ? el.value : null; }
-async function finishSetup(tok, person, pin) {
-  var test = await readFile(FILE, tok); // 열쇠 확인
-  if (!test) throw new Error('데이터 파일이 없어요');
-  var blob = await seal(tok, pin);
-  localStorage.setItem('runway.enc', JSON.stringify({ v: 1, person: person, blob: blob }));
-  localStorage.removeItem('runway.bootstrap');
-  sessionStorage.setItem('runway.tok', tok);
-  TOKEN = tok; ME = person;
-  if (location.hash) history.replaceState(null, '', location.pathname);
-  start();
-}
+// ---------- 열기: 로그인 없음 (공유 링크를 한 번 열면 이 기기에 저장) ----------
 function showLock(html) { $('#app').hidden = true; var l = $('#lock'); l.hidden = false; l.innerHTML = '<div class="lockcard">' + html + '</div>'; }
-function showFirst(tok) {
-  showLock('<h2>처음 설정</h2><div class="sub">이 기기에서 쓸 사람과 PIN을 정해 주세요. 앱을 열 때마다 PIN을 물어봐요.</div>' + personPicker('who') + pinFields() + '<button class="btn" id="go">시작하기</button>');
-  $('#go').onclick = async function () {
-    var p = pickedPerson('who'); if (!p) return toast('누구인지 골라 주세요');
-    var pin = checkPins(); if (!pin) return;
-    this.disabled = true; this.textContent = '확인 중...';
-    try { await finishSetup(tok, p, pin); } catch (e) { this.disabled = false; this.textContent = '시작하기'; toast(e.auth ? '열쇠가 맞지 않아요' : e.message); }
+function shareUrl() { return location.origin + location.pathname + '#k=' + encodeURIComponent(TOKEN); }
+function showPick() {
+  showLock('<h2>누구세요?</h2><div class="sub">한 번 고르면 이 기기에 저장돼요. 나중에 설정에서 바꿀 수 있어요.</div><div class="pick"><button class="btn" data-me="택">택</button><button class="btn" data-me="쮸">쮸</button></div>');
+  document.querySelectorAll('[data-me]').forEach(function (b) { b.onclick = function () { localStorage.setItem('runway.me', b.dataset.me); ME = b.dataset.me; start(); }; });
+}
+function showNoKey() {
+  showLock('<h2>공유 링크로 열어 주세요</h2><div class="sub">런웨이는 로그인 없이 <b>공유 링크</b>로 열어요. 이미 쓰고 있는 기기의 <b>설정 → 공유 링크</b>에서 링크를 받거나 QR을 찍어 주세요. 한 번 열면 이 기기에서는 계속 바로 열려요.</div>' +
+    '<details style="margin-top:16px"><summary class="muted" style="font-size:13px">링크 직접 붙여넣기</summary><textarea id="rawtok" placeholder="https://...#k=..."></textarea><button class="btn gray" id="rawgo">열기</button></details>');
+  $('#rawgo').onclick = function () {
+    var t = $('#rawtok').value.trim(), m = t.match(/[#&]k=([^&\s]+)/); if (m) t = decodeURIComponent(m[1]);
+    if (!/^github_pat_/.test(t)) return toast('공유 링크가 아니에요');
+    localStorage.setItem('runway.key', t); boot();
   };
 }
-function showJoin(blob) {
-  showLock('<h2>이 기기 등록</h2><div class="sub">QR을 만든 사람에게 등록 암호를 받아 넣어 주세요.</div><label class="f">등록 암호</label><input id="jpass" type="password" autocomplete="off">' + personPicker('who') + pinFields() + '<button class="btn" id="go">등록하기</button>');
-  $('#go').onclick = async function () {
-    var pass = $('#jpass').value; if (!pass) return toast('등록 암호를 넣어 주세요');
-    var p = pickedPerson('who'); if (!p) return toast('누구인지 골라 주세요');
-    var pin = checkPins(); if (!pin) return;
-    this.disabled = true; this.textContent = '확인 중...';
-    var tok;
-    try { tok = await unseal(blob, pass); } catch (e) { this.disabled = false; this.textContent = '등록하기'; return toast('등록 암호가 달라요'); }
-    try { await finishSetup(tok, p, pin); } catch (e) { this.disabled = false; this.textContent = '등록하기'; toast(e.auth ? '이 QR의 열쇠가 폐기됐어요' : e.message); }
-  };
-}
-function showUnlock(st) {
-  showLock('<h2>쮸앤택 Runway</h2><div class="sub">' + esc(st.person) + '님, PIN을 넣어 주세요.</div><label class="f">PIN</label><input id="pin" type="password" inputmode="numeric" autocomplete="current-password"><button class="btn" id="go">열기</button><button class="btn gray" id="forget">이 기기 등록 해제</button>');
-  var go = async function () {
-    var pin = $('#pin').value.trim(); if (!pin) return;
-    $('#go').disabled = true;
-    try { var tok = await unseal(st.blob, pin); sessionStorage.setItem('runway.tok', tok); TOKEN = tok; ME = st.person; start(); }
-    catch (e) { $('#go').disabled = false; $('#pin').value = ''; toast('PIN이 달라요'); }
-  };
-  $('#go').onclick = go;
-  $('#pin').onkeydown = function (e) { if (e.key === 'Enter') go(); };
-  $('#forget').onclick = function () { if (confirm('이 기기의 등록을 해제할까요? 다시 쓰려면 QR로 등록해야 해요.')) { localStorage.removeItem('runway.enc'); sessionStorage.removeItem('runway.tok'); location.reload(); } };
-  setTimeout(function () { var p = $('#pin'); if (p) p.focus(); }, 50);
-}
-function showNoDevice() {
-  showLock('<h2>등록되지 않은 기기예요</h2><div class="sub">이미 쓰고 있는 휴대폰이나 PC에서 <b>설정 → 기기 추가</b>를 눌러 QR을 만들고, 이 기기 카메라로 찍어 주세요.</div>' +
-    '<details style="margin-top:16px"><summary class="muted" style="font-size:13px">열쇠 직접 넣기 (관리자용)</summary><textarea id="rawtok" placeholder="github_pat_..."></textarea><button class="btn gray" id="rawgo">다음</button></details>');
-  $('#rawgo').onclick = function () { var t = $('#rawtok').value.trim(); if (!/^github_pat_/.test(t)) return toast('열쇠 형식이 아니에요'); showFirst(t); };
-}
-async function boot() {
-  var hash = new URLSearchParams(location.hash.slice(1));
-  var join = hash.get('join');
-  var st = null; try { st = JSON.parse(localStorage.getItem('runway.enc') || 'null'); } catch (e) {}
-  var sess = sessionStorage.getItem('runway.tok');
-  if (join) return showJoin(join);
-  if (st && sess) { TOKEN = sess; ME = st.person; return start(); }
-  if (st) return showUnlock(st);
-  var bt = localStorage.getItem('runway.bootstrap');
-  if (bt) return showFirst(bt);
-  showNoDevice();
+function boot() {
+  var hp = new URLSearchParams(location.hash.slice(1)), k = hp.get('k');
+  if (k) { localStorage.setItem('runway.key', k); history.replaceState(null, '', location.pathname); }
+  var old = localStorage.getItem('runway.bootstrap') || sessionStorage.getItem('runway.tok'); // 예전 방식 정리
+  if (old && !localStorage.getItem('runway.key')) localStorage.setItem('runway.key', old);
+  try { var st = JSON.parse(localStorage.getItem('runway.enc') || 'null'); if (st && st.person && !localStorage.getItem('runway.me')) localStorage.setItem('runway.me', st.person); } catch (e) {}
+  ['runway.bootstrap', 'runway.enc'].forEach(function (x) { localStorage.removeItem(x); }); sessionStorage.removeItem('runway.tok');
+  TOKEN = localStorage.getItem('runway.key');
+  if (!TOKEN) return showNoKey();
+  ME = localStorage.getItem('runway.me');
+  if (ME !== '택' && ME !== '쮸') return showPick();
+  start();
 }
 
 // ---------- 앱 시작 ----------
@@ -188,7 +121,7 @@ async function start() {
     var f = await readFile(FILE);
     LEDGER = f.data; SHA = f.sha;
   } catch (e) {
-    if (e.auth) { sessionStorage.removeItem('runway.tok'); showLock('<h2>열쇠를 쓸 수 없어요</h2><div class="sub">열쇠가 만료되었거나 폐기됐어요. 다른 기기에서 QR로 다시 등록해 주세요.</div><button class="btn gray" onclick="localStorage.removeItem(\'runway.enc\');location.reload()">이 기기 등록 해제</button>'); return; }
+    if (e.auth) { showLock('<h2>공유 링크가 바뀌었어요</h2><div class="sub">링크가 만료되었거나 새 링크로 바뀌었어요. 새 공유 링크로 다시 열어 주세요.</div><button class="btn gray" onclick="localStorage.removeItem(\'runway.key\');location.reload()">이 기기에서 지우고 다시 열기</button>'); return; }
     $('#tab-home').innerHTML = '<div class="card">불러오지 못했어요: ' + esc(e.message) + '</div>'; return;
   }
   readFile('state.json').then(function (s) { STATE = s ? s.data : null; if (TAB === 'set') renderSet(); }).catch(function () {});
@@ -221,7 +154,7 @@ function renderHome() {
   var havePx = PRICES.SOL != null && PRICES.WLD != null;
   var h = '';
   h += '<div class="hero"><div class="hero-top"><b>쮸앤택 Runway</b><span class="pill ' + r.status + '">' + lv(r.status) + '</span></div>';
-  h += '<div class="hero-sub">우리의 1년 Runway · ' + esc(S.periodStart) + ' ~ ' + esc(C.addDays(S.targetDate, -1)) + '</div>';
+  h += '<div class="hero-sub">우리의 1년 Runway · ' + esc(S.periodStart) + ' ~ ' + esc(C.addDays(S.targetDate, -1)) + ' · 나: ' + esc(ME) + '</div>';
   h += '<div class="hero-nums"><div><small>목표자금</small><b>' + won(r.budgetTotal) + '</b></div><div><small>현재 자산</small><b>' + (havePx ? won(r.pool) : '시세 확인 중') + '</b></div><div><small>남은 기간</small><b>D-' + Math.max(0, r.daysToTarget) + '</b></div></div></div>';
   var shown = r.alerts.filter(function (a) { return a.level !== 'info' || a.key === 'setup' || a.key === 'cash_negative' || /^card_/.test(a.key) || a.key === 'overdue'; });
   if (shown.length) { h += '<div class="alerts">'; shown.forEach(function (a) { h += '<div class="al ' + a.level + '"><b>' + esc(a.title) + '</b><span>' + esc(a.detail) + '</span></div>'; }); h += '</div>'; }
@@ -246,15 +179,18 @@ function renderHome() {
     h += '<div class="bar"><i style="width:' + (p * 100) + '%;background:' + b[2] + '"></i></div><div class="sub">사용 ' + won(r.used[b[0]]) + ' · 남은 비율 ' + Math.round(p * 100) + '%</div></div>';
   });
   h += '</div>';
-  // 4 이번 달
-  var tm = r.thisMonth, ml = +S.monthly.life || 0, mp = +S.monthly.personal || 0;
+  // 4 이번 달 (공금통장 잔액·각자 입금 포함)
+  var tm = r.thisMonth, ml = +S.monthly.life || 0, mp = +S.monthly.personal || 0, jbx = r.jointBalance;
   h += '<div class="card"><h3>4. 이번 달 <small>' + r.ym.replace('-', '년 ') + '월</small></h3>';
-  h += '<div class="row"><span class="k">공동통장 입금 (예정 ' + won(ml) + ')</span><span class="v">' + won(tm.joint) + '</span></div>';
+  h += '<div class="row"><span class="k">공금통장(토스뱅크) 잔액</span><span class="v">' + (jbx ? won(jbx.amount) : '입력 전') + ' <button class="mini" id="jbEdit">수정</button></span></div>';
+  if (jbx) h += '<div class="hint" style="margin:-2px 0 4px;text-align:right">' + esc(jbx.by) + ' · ' + esc(jbx.date) + ' 수정</div>';
+  h += '<div class="row"><span class="k">이번 달 공금통장 입금</span><span class="v">택 ' + won(tm.jointBy['택'] || 0) + ' · 쮸 ' + won(tm.jointBy['쮸'] || 0) + '</span></div>';
+  h += '<div class="row"><span class="k">생활비 (런웨이에서, 예정 ' + won(ml) + ')</span><span class="v">' + won(tm.life) + '</span></div>';
   h += '<div class="row"><span class="k">카드값 (한도 ' + won(mp) + ')</span><span class="v">' + won(tm.card) + '</span></div>';
   if (tm.expense) h += '<div class="row"><span class="k">기타 지출</span><span class="v">' + won(tm.expense) + '</span></div>';
   h += '<div class="row"><span class="k">회사 사용액</span><span class="v">' + won(tm.corpSpend) + '</span></div>';
-  h += '<div class="row total"><span class="k">이번 달 총 소진</span><span class="v">' + won(tm.total) + '</span></div>';
-  h += '<div class="sub">생활 ' + (ml ? Math.round(tm.life / ml * 100) : 0) + '% · 개인 ' + (mp ? Math.round(tm.personal / mp * 100) : 0) + '% 사용 (월 한도 대비)</div></div>';
+  h += '<div class="row total"><span class="k">이번 달 런웨이 총 소진</span><span class="v">' + won(tm.total) + '</span></div>';
+  h += '<div class="sub">생활 ' + (ml ? Math.round(tm.life / ml * 100) : 0) + '% · 개인 ' + (mp ? Math.round(tm.personal / mp * 100) : 0) + '% 사용 (월 한도 대비). 각자 개인 돈으로 넣은 입금은 런웨이 소진에 안 들어가요.</div></div>';
   // 5 런웨이
   var p = r.plan;
   h += '<div class="card"><h3>5. 남은 런웨이 <small>계획대로 쓰면</small></h3>';
@@ -274,28 +210,38 @@ function renderHome() {
   r.planned.slice(0, 8).forEach(function (x) { h += '<div class="row"><span class="k">' + esc(x.date) + ' · ' + (x.kind === 'corp' ? '법인 입금' : '기타') + (x.memo ? ' · ' + esc(x.memo) : '') + '</span><span class="v">' + won(x.amount) + '</span></div>'; });
   h += '</div>';
   $('#tab-home').innerHTML = h;
+  var jbE = $('#jbEdit'); if (jbE) jbE.onclick = editJointBalance;
+}
+function editJointBalance() {
+  var cur = calc().jointBalance;
+  var v = prompt('공금통장(토스뱅크) 지금 잔액을 넣어 주세요', cur ? String(Math.round(cur.amount)) : '');
+  if (v == null) return;
+  var amt = parseNum(v); if (!isFinite(amt) || amt < 0) return toast('금액을 확인해 주세요');
+  doSave(function (L) { L.records = L.records || []; L.records.push({ id: uid(), type: 'jbal', amount: amt, date: today(), by: ME, createdAt: nowIso() }); }, '공금통장 잔액 ' + won(amt), '잔액을 ' + won(amt) + '으로 바꿨어요');
 }
 
 // ---------- 기록 ----------
 var FORMS = {
   sale: { t: '매도', f: [['date', '날짜', 'date'], ['coin', '코인', 'coin'], ['qty', '판 수량', 'num'], ['price', '매도가 (1개 체결가)', 'won'], ['krw', '실제 받은 원화 (수수료 뺀 금액)', 'won'], ['dest', '받은 돈 보낸 곳', 'dest'], ['req', '연결할 요청 메모', 'req'], ['memo', '메모', 'text']] },
-  joint: { t: '공동통장 입금', f: [['date', '날짜', 'date'], ['amount', '금액', 'won', 2500000], ['plan', '완료할 예정 출금', 'planned'], ['memo', '메모', 'text']] },
+  joint: { t: '공금통장 입금', f: [['who', '입금자', 'who'], ['date', '입금일', 'date'], ['amount', '금액', 'won'], ['src', '돈 출처', 'src'], ['plan', '완료할 예정 출금', 'planned'], ['memo', '메모', 'text']] },
   card: { t: '카드값', f: [['month', '결제월', 'month'], ['amount', '결제 금액', 'won'], ['memo', '메모', 'text']] },
   expense: { t: '지출', f: [['date', '날짜', 'date'], ['amount', '금액', 'won'], ['bucket', '어느 예산에서', 'bucket'], ['plan', '완료할 예정 출금', 'planned'], ['memo', '어디에 썼는지', 'text']] },
   corp_in: { t: '법인 입금', f: [['date', '날짜', 'date'], ['amount', '금액', 'won'], ['plan', '완료할 예정 출금', 'planned'], ['memo', '메모', 'text']] },
   corp_spend: { t: '회사 사용액', f: [['month', '월', 'month'], ['amount', '그 달 법인 계좌에서 쓴 돈', 'won'], ['memo', '메모', 'text']] },
-  income: { t: '현금 들어옴', f: [['date', '날짜', 'date'], ['amount', '금액', 'won'], ['memo', '어디서 들어온 돈인지', 'text']] },
+  income: { t: '현금 들어옴', f: [['who', '누가 넣었나', 'who'], ['date', '입금일', 'date'], ['amount', '금액', 'won'], ['memo', '어디서 들어온 돈인지 (런웨이 자산으로 들어온 돈)', 'text']] },
   planned: { t: '예정 출금', f: [['date', '나갈 날짜', 'date'], ['amount', '금액', 'won'], ['kind', '종류', 'kind'], ['memo', '메모', 'text']] }
 };
 function field(k, label, kind, def) {
   var id = 'fx_' + k, x = '<label class="f" for="' + id + '">' + label + '</label>';
   var recs = LEDGER.records || [];
   if (kind === 'date') return x + '<input id="' + id + '" type="date" value="' + today() + '">';
+  if (kind === 'who') return x + '<select id="' + id + '"><option value="택"' + (ME === '택' ? ' selected' : '') + '>택</option><option value="쮸"' + (ME === '쮸' ? ' selected' : '') + '>쮸</option></select>';
+  if (kind === 'src') return x + '<select id="' + id + '"><option value="pool"' + (ME === '쮸' ? '' : ' selected') + '>런웨이 자산에서 (코인 판 돈·현금)</option><option value="own"' + (ME === '쮸' ? ' selected' : '') + '>각자 개인 돈에서 (월급 등)</option></select><div class="hint">런웨이 자산에서 넣은 돈은 생활 예산에서 빠지고, 개인 돈으로 넣은 돈은 누가 얼마 넣었는지만 기록돼요.</div>';
   if (kind === 'month') return x + '<input id="' + id + '" type="month" value="' + today().slice(0, 7) + '">';
   if (kind === 'coin') return x + '<select id="' + id + '"><option value="SOL">SOL (솔라나)</option><option value="WLD">WLD (월드코인)</option></select>';
   if (kind === 'num') return x + '<input id="' + id + '" type="text" inputmode="decimal" placeholder="예: 3">';
   if (kind === 'won') return x + '<input id="' + id + '" type="text" inputmode="numeric" placeholder="원" value="' + (def ? def.toLocaleString('ko-KR') : '') + '">';
-  if (kind === 'dest') return x + '<select id="' + id + '"><option value="cash">내 계좌에 둠 (현금)</option><option value="joint">공동통장으로 바로 보냄</option><option value="corp">법인으로 바로 보냄</option></select><div class="hint">공동통장·법인으로 바로 보냈으면 그 입금 기록도 같이 만들어져요.</div>';
+  if (kind === 'dest') return x + '<select id="' + id + '"><option value="cash">내 계좌에 둠 (현금)</option><option value="joint">공금통장(토스뱅크)으로 바로 보냄</option><option value="corp">법인으로 바로 보냄</option></select><div class="hint">공금통장·법인으로 바로 보냈으면 그 입금 기록도 같이 만들어져요.</div>';
   if (kind === 'bucket') return x + '<select id="' + id + '"><option value="life">생활 (공동)</option><option value="personal">개인</option><option value="company">회사</option><option value="none">예산 밖 (계산만 반영)</option></select>';
   if (kind === 'kind') return x + '<select id="' + id + '"><option value="corp">법인 입금 (회사 예산)</option><option value="other">기타 큰 출금</option></select>';
   if (kind === 'planned') { var ps = recs.filter(function (r) { return r.type === 'planned' && !r.canceled && !r.done; }); return x + '<select id="' + id + '"><option value="">없음</option>' + ps.map(function (p) { return '<option value="' + p.id + '">' + esc(p.date) + ' ' + won(p.amount) + (p.memo ? ' ' + esc(p.memo) : '') + '</option>'; }).join('') + '</select>'; }
@@ -306,6 +252,9 @@ function recLine(r) {
   var who = esc(r.by || ''), a = r.amount != null ? won(r.amount) : '';
   if (r.type === 'sale') return { t: '매도 ' + r.coin + ' ' + n2(r.qty) + '개 → ' + won(r.krw), s: r.date + ' · 매도가 ' + won(r.price) + ' · ' + C.DEST[r.dest || 'cash'] + ' · ' + who };
   if (r.type === 'card') return { t: '카드값 ' + a, s: r.month + ' 결제 · ' + who };
+  if (r.type === 'joint') { var wj = esc(r.who || r.by || ''); return { t: '공금통장 입금 ' + a + ' (' + (r.who || r.by || '') + ')', s: r.date + ' 입금 · ' + C.SRC[r.src || 'pool'] + (r.who && r.by && r.who !== r.by ? ' · ' + who + ' 기록' : '') }; }
+  if (r.type === 'jbal') return { t: '공금통장 잔액 ' + a, s: r.date + ' · ' + who + ' 수정' };
+  if (r.type === 'income') return { t: '현금 들어옴 ' + a + (r.who ? ' (' + r.who + ')' : ''), s: r.date + ' 입금 · ' + who };
   if (r.type === 'corp_spend') return { t: '회사 사용액 ' + a, s: r.month + ' · ' + who };
   if (r.type === 'expense') return { t: '지출 ' + a + ' (' + C.BUCKET[r.bucket || 'none'] + ')', s: r.date + ' · ' + who };
   if (r.type === 'planned') return { t: '예정 출금 ' + a + (r.kind === 'corp' ? ' (법인 입금)' : ''), s: r.date + ' 예정' + (r.done ? ' · 완료됨' : '') + ' · ' + who };
@@ -326,6 +275,13 @@ function renderRec() {
   if (!sales.length) h += '<div class="sub">아직 매도 기록이 없어요.</div>';
   else { h += '<table class="tb"><tr><th>날짜</th><th>코인</th><th>수량</th><th>매도가</th><th>실제 원화</th></tr>'; sales.forEach(function (r) { h += '<tr><td>' + esc(r.date.slice(5)) + '</td><td>' + r.coin + '</td><td>' + n2(r.qty) + '</td><td>' + won(r.price) + '</td><td>' + won(r.krw) + '</td></tr>'; }); h += '</table>'; }
   h += '</div>';
+  // 공금통장 입금 내역
+  var rr = calc(), deps = recs.filter(function (r) { return r.type === 'joint' && !r.canceled; }).sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+  h += '<div class="card"><h3>공금통장 (토스뱅크) <small>잔액 ' + (rr.jointBalance ? won(rr.jointBalance.amount) : '입력 전') + ' <button class="mini" id="jbEdit2">잔액 수정</button></small></h3>';
+  h += '<div class="row"><span class="k">입금 누계</span><span class="v">택 ' + won(rr.depTotal['택'] || 0) + ' · 쮸 ' + won(rr.depTotal['쮸'] || 0) + '</span></div>';
+  if (!deps.length) h += '<div class="sub">아직 입금 기록이 없어요. 위에서 "공금통장 입금"으로 적어 주세요.</div>';
+  else { h += '<table class="tb"><tr><th>입금일</th><th>입금자</th><th>금액</th><th>출처</th></tr>'; deps.slice(0, 20).forEach(function (r) { h += '<tr><td>' + esc(r.date.slice(5)) + '</td><td>' + esc(r.who || r.by || '') + '</td><td>' + won(r.amount) + '</td><td>' + (r.src === 'own' ? '개인 돈' : '런웨이') + '</td></tr>'; }); h += '</table>'; }
+  h += '</div>';
   // 전체 기록
   var all = recs.filter(function (r) { return r.type !== 'memo'; }).sort(function (a, b) { return (a.createdAt || '') < (b.createdAt || '') ? 1 : -1; });
   h += '<div class="card"><h3>전체 기록 <small>지우지 않고 취소만 돼요</small></h3><div class="list">';
@@ -342,7 +298,9 @@ function renderRec() {
   document.querySelectorAll('[data-rt]').forEach(function (b) { b.onclick = function () { RECTYPE = b.dataset.rt; renderRec(); }; });
   document.querySelectorAll('input[inputmode=numeric]').forEach(function (i) { i.onblur = function () { var v = parseNum(i.value); if (isFinite(v)) i.value = v.toLocaleString('ko-KR'); }; });
   if (RECTYPE === 'sale') setupSaleForm();
+  if (RECTYPE === 'joint') { var wsel = $('#fx_who'), ssel = $('#fx_src'), touched = false; ssel.onchange = function () { touched = true; }; wsel.onchange = function () { if (!touched) ssel.value = wsel.value === '쮸' ? 'own' : 'pool'; }; }
   $('#recsave').onclick = submitRec;
+  var jb2 = $('#jbEdit2'); if (jb2) jb2.onclick = editJointBalance;
   document.querySelectorAll('[data-cancel]').forEach(function (b) { b.onclick = function () { cancelRec(b.dataset.cancel); }; });
   document.querySelectorAll('[data-done]').forEach(function (b) { b.onclick = function () { var id = b.dataset.done; doSave(function (L) { var p = L.records.find(function (x) { return x.id === id; }); if (p) p.done = { at: nowIso(), by: ME }; }, '예정 출금 완료', '완료 처리했어요'); }; });
   var more = $('#more'); if (more) more.onclick = function () { histLimit += 50; renderRec(); };
@@ -368,6 +326,7 @@ async function submitRec() {
     if (!(rec.qty > 0) || !(rec.price > 0) || !(rec.krw > 0)) return toast('수량, 매도가, 받은 원화를 넣어 주세요');
     if (rec.dest === 'joint' || rec.dest === 'corp') {
       extra = { id: uid(), type: rec.dest === 'joint' ? 'joint' : 'corp_in', by: ME, createdAt: nowIso(), date: rec.date, amount: rec.krw, linked: rec.id, memo: '매도 금액 바로 입금' };
+      if (extra.type === 'joint') { extra.who = ME; extra.src = 'pool'; }
       rec.linked = extra.id;
     }
   } else {
@@ -375,6 +334,8 @@ async function submitRec() {
     rec.amount = parseNum(g('amount'));
     if (!(rec.amount > 0)) return toast('금액을 넣어 주세요');
     if (t === 'expense') rec.bucket = g('bucket');
+    if (t === 'joint') { rec.who = g('who'); rec.src = g('src'); }
+    if (t === 'income') rec.who = g('who');
     if (t === 'planned') rec.kind = g('kind');
   }
   if (!(rec.date || rec.month)) return toast('날짜를 넣어 주세요');
@@ -463,7 +424,7 @@ function renderSet() {
   h += '<label class="f">생활(공동) 예산 총액</label><input id="p_bl" inputmode="numeric" value="' + (+S.budgets.life).toLocaleString('ko-KR') + '">';
   h += '<label class="f">개인 예산 총액</label><input id="p_bp" inputmode="numeric" value="' + (+S.budgets.personal).toLocaleString('ko-KR') + '">';
   h += '<label class="f">회사 예산 총액</label><input id="p_bc" inputmode="numeric" value="' + (+S.budgets.company).toLocaleString('ko-KR') + '">';
-  h += '<label class="f">월 생활비 한도 (공동통장)</label><input id="p_ml" inputmode="numeric" value="' + (+S.monthly.life).toLocaleString('ko-KR') + '">';
+  h += '<label class="f">월 생활비 한도 (공금통장으로 보내는 돈)</label><input id="p_ml" inputmode="numeric" value="' + (+S.monthly.life).toLocaleString('ko-KR') + '">';
   h += '<label class="f">월 개인비 한도 (카드)</label><input id="p_mp" inputmode="numeric" value="' + (+S.monthly.personal).toLocaleString('ko-KR') + '">';
   h += '<label class="f">카드 결제일 (매월)</label><input id="p_card" inputmode="numeric" value="' + S.cardDay + '">';
   h += '<label class="f">회사 월 예상 사용액 (사용액 기록 전까지 회사 런웨이 계산용)</label><input id="p_cg" inputmode="numeric" value="' + (+S.companyMonthlyGuess || 0).toLocaleString('ko-KR') + '">';
@@ -477,11 +438,12 @@ function renderSet() {
   h += '<button class="btn" id="a_save">알림 기준 저장</button>';
   var st = STATE || {};
   h += '<div class="hint">마지막 알림 점검: ' + (st.lastRun ? new Date(st.lastRun).toLocaleString('ko-KR') : '아직 없음') + ' · 텔레그램: ' + (st.telegram ? '연결됨' : '아직 연결 안 됨') + '</div></div>';
-  h += '<div class="card"><h3>기기 <small>이 기기: ' + esc(ME) + '</small></h3>';
-  h += '<div class="sub">새 휴대폰을 등록하려면 등록 암호를 정하고 QR을 만든 뒤, 새 휴대폰 카메라로 찍어요. 암호는 QR과 따로 알려 주세요.</div>';
-  h += '<label class="f">등록 암호 (6자 이상)</label><input id="d_pass" type="password" autocomplete="off">';
-  h += '<button class="btn" id="d_qr">기기 추가 QR 만들기</button><div id="d_out"></div>';
-  h += '<button class="btn gray" id="d_lock">지금 잠그기</button><button class="btn red" id="d_forget">이 기기 등록 해제</button></div>';
+  h += '<div class="card"><h3>나와 공유</h3>';
+  h += '<div class="row"><span class="k">이 기기 사용자</span><span class="v">' + esc(ME) + ' <button class="mini" id="d_me">바꾸기</button></span></div>';
+  h += '<div class="sub" style="margin-top:8px">여자친구분 휴대폰이나 새 기기는 공유 링크를 보내거나 QR을 찍게 하면 돼요. 로그인 없이 바로 열리고, 처음 한 번만 택/쮸를 골라요.</div>';
+  h += '<button class="btn" id="d_copy">공유 링크 복사</button><button class="btn gray" id="d_qr">QR 보기</button><div id="d_out"></div>';
+  h += '<div class="hint">이 링크를 가진 사람은 누구나 보고 기록할 수 있어요. 두 분만 가지고 있어 주세요. 링크가 새면 새 링크로 바꿀 수 있어요.</div>';
+  h += '<button class="btn red" id="d_forget">이 기기에서 런웨이 지우기</button></div>';
   h += '<div class="card"><h3>데이터</h3><div class="sub">모든 기록은 비공개 저장소(runway-data)에 저장되고, 바뀔 때마다 변경 이력이 남아요.</div><button class="btn gray" id="x_dl">기록 파일 내려받기 (백업)</button></div>';
   $('#tab-set').innerHTML = h;
   var v = function (id) { var el = $('#' + id); return el ? el.value : ''; };
@@ -511,16 +473,10 @@ function renderSet() {
     if (Object.keys(na).some(function (k) { return !isFinite(na[k]) || na[k] < 0; })) return toast('숫자를 확인해 주세요');
     doSave(function (L) { L.settings.alert = Object.assign(L.settings.alert || {}, na); }, '알림 기준 변경', '알림 기준을 저장했어요');
   };
-  $('#d_qr').onclick = async function () {
-    var pass = v('d_pass'); if (pass.length < 6) return toast('등록 암호는 6자 이상이에요');
-    var blob = await seal(TOKEN, pass);
-    var url = location.origin + location.pathname + '#join=' + blob;
-    var q = qrcode(0, 'M'); q.addData(url); q.make();
-    $('#d_out').innerHTML = '<div class="qr">' + q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }) + '</div><button class="btn gray" id="d_copy">등록 링크 복사</button><div class="hint">등록이 끝나면 이 화면을 닫아 주세요. QR만으로는 열 수 없고 등록 암호가 있어야 해요.</div>';
-    $('#d_copy').onclick = function () { navigator.clipboard.writeText(url).then(function () { toast('링크를 복사했어요'); }); };
-  };
-  $('#d_lock').onclick = function () { sessionStorage.removeItem('runway.tok'); location.reload(); };
-  $('#d_forget').onclick = function () { if (confirm('이 기기의 등록을 해제할까요?')) { localStorage.removeItem('runway.enc'); sessionStorage.removeItem('runway.tok'); location.reload(); } };
+  $('#d_me').onclick = function () { var other = ME === '택' ? '쮸' : '택'; if (confirm('이 기기 사용자를 ' + other + '(으)로 바꿀까요?')) { localStorage.setItem('runway.me', other); ME = other; toast('이제 ' + other + '(으)로 기록돼요'); renderSet(); } };
+  $('#d_copy').onclick = function () { navigator.clipboard.writeText(shareUrl()).then(function () { toast('공유 링크를 복사했어요'); }, function () { prompt('아래 링크를 복사해 주세요', shareUrl()); }); };
+  $('#d_qr').onclick = function () { var q = qrcode(0, 'M'); q.addData(shareUrl()); q.make(); $('#d_out').innerHTML = '<div class="qr">' + q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }) + '</div><div class="hint">휴대폰 카메라로 찍으면 바로 열려요. 다 찍으면 설정 화면을 벗어나 주세요.</div>'; };
+  $('#d_forget').onclick = function () { if (confirm('이 기기에서 런웨이를 지울까요? 다시 보려면 공유 링크가 필요해요.')) { localStorage.removeItem('runway.key'); localStorage.removeItem('runway.me'); location.reload(); } };
   $('#x_dl').onclick = function () { var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(LEDGER, null, 1)], { type: 'application/json' })); a.download = 'runway-ledger-' + today() + '.json'; a.click(); };
 }
 

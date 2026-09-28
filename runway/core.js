@@ -2,9 +2,10 @@
 (function (root) {
   'use strict';
   var DAY = 86400000, MONTH = 30.4375;
-  var LABEL = { sale: '매도', joint: '공동통장 입금', card: '카드값', expense: '지출', corp_in: '법인 입금', corp_spend: '회사 사용액', income: '현금 들어옴', planned: '예정 출금', adjust: '잔액 맞추기', memo: '메모' };
+  var LABEL = { sale: '매도', joint: '공금통장 입금', jbal: '공금통장 잔액', card: '카드값', expense: '지출', corp_in: '법인 입금', corp_spend: '회사 사용액', income: '현금 들어옴', planned: '예정 출금', adjust: '잔액 맞추기', memo: '메모' };
   var BUCKET = { life: '생활', personal: '개인', company: '회사', none: '용도 없음' };
-  var DEST = { cash: '내 계좌(현금)', joint: '공동통장', corp: '법인' };
+  var DEST = { cash: '내 계좌(현금)', joint: '공금통장', corp: '법인' };
+  var SRC = { pool: '런웨이 자산에서', own: '개인 돈에서' };
 
   function kstToday(now) { return new Date((now || Date.now()) + 9 * 3600000).toISOString().slice(0, 10); }
   function toMs(d) { var p = d.split('-'); return Date.UTC(+p[0], +p[1] - 1, +p[2]); }
@@ -82,7 +83,7 @@
       var a = num(r.amount);
       switch (r.type) {
         case 'sale': hold[r.coin] = num(hold[r.coin]) - num(r.qty); cash += num(r.krw); cashed += num(r.krw); break;
-        case 'joint': cash -= a; if (inPlan(r)) used.life += a; break;
+        case 'joint': if (r.src !== 'own') { cash -= a; if (inPlan(r)) used.life += a; } break;
         case 'card': cash -= a; if (inPlan(r)) used.personal += a; break;
         case 'expense': cash -= a; if (inPlan(r) && used[r.bucket] != null) used[r.bucket] += a; break;
         case 'corp_in': cash -= a; corp += a; if (inPlan(r)) used.company += a; break;
@@ -109,10 +110,10 @@
     function monthOf(m) {
       var inM = function (r) { return r.type === 'card' || r.type === 'corp_spend' ? r.month === m : ymOf(recDay(r)) === m; };
       var rs = recs.filter(inM);
-      var o = { joint: 0, card: 0, expense: 0, expLife: 0, expPersonal: 0, corpSpend: 0, corpIn: 0 };
+      var o = { joint: 0, jointOwn: 0, jointBy: {}, card: 0, expense: 0, expLife: 0, expPersonal: 0, corpSpend: 0, corpIn: 0 };
       rs.forEach(function (r) {
         var a = num(r.amount);
-        if (r.type === 'joint') o.joint += a;
+        if (r.type === 'joint') { var w = r.who || r.by || '?'; o.jointBy[w] = (o.jointBy[w] || 0) + a; if (r.src === 'own') o.jointOwn += a; else o.joint += a; }
         else if (r.type === 'card') o.card += a;
         else if (r.type === 'expense') { o.expense += a; if (r.bucket === 'life') o.expLife += a; if (r.bucket === 'personal') o.expPersonal += a; }
         else if (r.type === 'corp_spend') o.corpSpend += a;
@@ -123,6 +124,10 @@
       return o;
     }
     var thisMonth = monthOf(ym);
+    var jb = recs.filter(function (r) { return r.type === 'jbal'; }).sort(function (a, b) { return (a.createdAt || '') < (b.createdAt || '') ? -1 : 1; });
+    var jointBalance = jb.length ? { amount: num(jb[jb.length - 1].amount), date: jb[jb.length - 1].date, by: jb[jb.length - 1].by, at: jb[jb.length - 1].createdAt } : null;
+    var depTotal = {};
+    recs.forEach(function (r) { if (r.type === 'joint') { var w = r.who || r.by || '?'; depTotal[w] = (depTotal[w] || 0) + num(r.amount); } });
 
     // 최근 속도: 계획 시작 이후 끝난 달 최대 3개
     var paceMonths = [];
@@ -192,13 +197,13 @@
     return {
       today: today, ym: ym, settings: S, prices: px, hold: hold, coinVal: coinVal, coinValue: coinValue, cash: cash, pool: pool, corp: corp, cashed: cashed,
       used: used, remaining: remaining, need: need, budgetTotal: budgetTotal, coverage: need > 0 ? pool / need : null, surplus: surplus,
-      thisMonth: thisMonth, monthly: L, paceL: paceL, paceMonths: paceMonths.length,
+      thisMonth: thisMonth, jointBalance: jointBalance, depTotal: depTotal, monthly: L, paceL: paceL, paceMonths: paceMonths.length,
       plan: plan, pace: pace, lifeMonths: lifeMonths, corpAvg: corpAvg, corpMonths: corpMonths, companyLeft: companyLeft, reserveNow: reserveNow,
       planned: planned, overdue: overdue, daysToTarget: diffDays(today, target), alerts: alerts, status: status
     };
   }
 
-  var api = { compute: compute, simulate: simulate, defaults: defaults, kstToday: kstToday, addDays: addDays, diffDays: diffDays, addMonths: addMonths, ymOf: ymOf, won: won, signWon: signWon, monthsText: monthsText, LABEL: LABEL, BUCKET: BUCKET, DEST: DEST };
+  var api = { SRC: SRC, compute: compute, simulate: simulate, defaults: defaults, kstToday: kstToday, addDays: addDays, diffDays: diffDays, addMonths: addMonths, ymOf: ymOf, won: won, signWon: signWon, monthsText: monthsText, LABEL: LABEL, BUCKET: BUCKET, DEST: DEST };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.RunwayCore = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
