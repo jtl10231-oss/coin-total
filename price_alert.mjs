@@ -63,6 +63,12 @@ export async function sendTo(token, state, envChat, text) {
   return j.ok ? 'sent' : 'fail:' + (j.description || '');
 }
 
+// 단체방을 처음 찾으면 비공개 런웨이 알림 쪽에도 번호를 알려줌 (점검 실행 켜기)
+async function tellRunway(chat) {
+  const t = process.env.RUNWAY_DISPATCH_TOKEN; if (!t) return;
+  const r = await fetch('https://api.github.com/repos/jtl10231-oss/runway-data/actions/workflows/check.yml/dispatches', { method: 'POST', headers: { Authorization: 'Bearer ' + t, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: 'main', inputs: { mode: 'event', chat } }) });
+  console.log('runway chat handoff:', r.status);
+}
 async function main() {
   const [, , HIST = '/tmp/history.json', OUT = '/tmp/alert_state.json'] = process.argv;
   const token = process.env.TELEGRAM_BOT_TOKEN || '', envChat = process.env.TELEGRAM_CHAT_ID || '';
@@ -71,16 +77,24 @@ async function main() {
   const h = JSON.parse(fs.readFileSync(HIST, 'utf8'));
   const idx = h.SOL.length - 1, tNow = h.t0 + idx * h.step;
   if (state.lastT && state.lastT >= tNow) { fs.writeFileSync(OUT, JSON.stringify(state)); return; } // 같은 분은 한 번만
-  const alerts = evaluate(h, idx, state);
-  state.lastT = tNow;
+  const prevChat = state.chat;
+  const work = JSON.parse(JSON.stringify(state));
+  const alerts = evaluate(h, idx, work);
+  work.lastT = tNow;
   if (token) {
-    if (!state.hello) {
-      const r = await sendTo(token, state, envChat, `쮸앤택 코인 알림이 켜졌어요.\n솔라나·월드코인이 1시간 안에 1%씩, 하루 사이 5%씩 오르거나 내리면 이 방으로 알려드려요.\n${APP}`);
-      if (r === 'sent') state.hello = 1;
+    if (!work.hello) {
+      const r = await sendTo(token, work, envChat, `쮸앤택 코인 알림이 켜졌어요.\n솔라나·월드코인이 1시간 안에 1%씩, 하루 사이 5%씩 오르거나 내리면 이 방으로 알려드려요.\n${APP}`);
+      if (r === 'sent') work.hello = 1;
       console.log('hello:', r);
     }
-    if (alerts.length) { const r = await sendTo(token, state, envChat, message(alerts, h, idx)); console.log('price alert:', alerts.map(a => a.sym + a.rule.key + a.dir).join(','), r); }
+    if (alerts.length) {
+      const r = await sendTo(token, work, envChat, message(alerts, h, idx));
+      console.log('price alert:', alerts.map(a => a.sym + a.rule.key + a.dir).join(','), r);
+      if (r !== 'sent') for (const x of alerts) { const k = x.sym + '_' + x.rule.key; if (state[k]) work[k] = state[k]; else delete work[k]; } // 못 보냈으면 다음 분에 다시
+    }
+    if (work.chat && work.chat !== prevChat) await tellRunway(work.chat);
   } else if (alerts.length) console.log('price alert (텔레그램 미설정):', alerts.map(a => a.sym + a.rule.key + a.dir).join(','));
+  state = work;
   fs.writeFileSync(OUT, JSON.stringify(state));
 }
 if (process.argv[1] && process.argv[1].endsWith('price_alert.mjs')) main().catch(e => { console.log('price alert error:', e.message); });
