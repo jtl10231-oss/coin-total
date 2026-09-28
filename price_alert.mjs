@@ -3,8 +3,8 @@ import fs from 'fs';
 import { execSync } from 'child_process';
 
 export const RULES = [
-  { key: 'h', win: 60, step: 0.01, label: '1시간 안에' },
-  { key: 'd', win: 1440, step: 0.05, label: '하루 사이' },
+  { key: 'h', win: 60, step: 0.02, label: '1시간 안에' },
+  { key: 'd', win: 1440, step: 0.07, label: '하루 사이' },
 ];
 const NAMES = { SOL: '솔라나(SOL)', WLD: '월드코인(WLD)' };
 const APP = 'https://jtl10231-oss.github.io/coin-total/runway/';
@@ -82,9 +82,9 @@ async function main() {
   const alerts = evaluate(h, idx, work);
   work.lastT = tNow;
   if (token) {
-    if (!work.hello) {
-      const r = await sendTo(token, work, envChat, `쮸앤택 코인 알림이 켜졌어요.\n솔라나·월드코인이 1시간 안에 1%씩, 하루 사이 5%씩 오르거나 내리면 이 방으로 알려드려요.\n${APP}`);
-      if (r === 'sent') work.hello = 1;
+    if (work.hello !== 2) {
+      const r = await sendTo(token, work, envChat, `쮸앤택 코인 알림 기준을 바꿨어요.\n이제 솔라나·월드코인이 1시간 안에 2%씩, 하루 사이 7%씩 오르거나 내리면 알려드려요.\n${APP}`);
+      if (r === 'sent') work.hello = 2;
       console.log('hello:', r);
     }
     if (alerts.length) {
