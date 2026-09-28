@@ -168,7 +168,7 @@
       } else if (!last) s += sum(since.filter(function (e) { return e.kind === 'expense' && e.date >= ms && e.date <= me; }), function (e) { return -e.amount; });
       return s;
     }
-    used.life = spentIn(from, addDays(target, -1));
+    used.life = spentIn(S.periodStart && S.periodStart > from ? S.periodStart : from, addDays(target, -1)); // 목표자금 기간(계획 시작일~)에 쓴 돈
     var spentThisMonth = spentIn(ym + '-01', ym + '-' + String(dim(ym)).padStart(2, '0'));
 
     // 5) 자산, 목표
@@ -198,7 +198,21 @@
     var recurringMonthly = sum((S.recurring || []).filter(function (c) { var nm = addMonths(ym, 1); return c && c.from <= nm && c.to >= nm; }), function (c) { return c.amount; });
     var monthlyGap = Math.max(0, mainMonthly - recurringMonthly);
 
-    // 7) 경고 (앱 화면)
+    // 7) 계획 대비 아낀 돈: 계획 시작일부터(잔액 기록이 그보다 늦게 시작했으면 첫 기록 다음 날부터) 오늘까지
+    //    계획대로면 쓸 돈(월 생활비를 하루 단위로 나눠 합한 값) - 실제 쓴 돈(잔액 변화로 계산)
+    var w0 = addDays(S.periodStart, -1);
+    if (anchors.length && anchors[0].date > w0) w0 = anchors[0].date;
+    var planToDate = 0, spentToDate = 0, saved = null, savedDays = 0, savedFrom = addDays(w0, 1);
+    var wEnd = today < target ? today : addDays(target, -1);
+    if (anchors.length && wEnd > w0) {
+      for (var dd = savedFrom; dd <= wEnd; dd = addDays(dd, 1)) { planToDate += planMonthly / dim(ymOf(dd)); savedDays++; }
+      spentToDate = spentIn(savedFrom, wEnd);
+      saved = planToDate - spentToDate;
+    }
+    var remainDays = Math.max(0, diffDays(today, target) - 1);
+    var projectedSave = saved != null && burnReady ? saved + (planMonthly - burnMonthly) * remainDays / MONTH : null;
+
+    // 8) 경고 (앱 화면)
     var alerts = [];
     function add(key, level, title, detail) { alerts.push({ key: key, level: level, title: title, detail: detail || '' }); }
     var basis = burnReady ? '지금 소비 속도(월 ' + won(burnMonthly) + ')로' : '계획(월 ' + won(planMonthly) + ')대로';
@@ -233,6 +247,7 @@
       expected: expected, expectedFuture: expectedFuture, autoDeps: autoDeps, skipped: skipped,
       assetsNow: assetsNow, pool: assetsNow, secured: secured, used: used, remaining: remaining, need: need, budgetTotal: budgetTotal, coverage: need > 0 ? secured / need : null, surplus: surplus,
       planMonthly: planMonthly, mainMonthly: mainMonthly, monthsInPeriod: monthsInPeriod, recurringMonthly: recurringMonthly, monthlyGap: monthlyGap, plan: plan, pace: pace, main: main, jointOnly: jointOnly, planned: planned, overdue: overdue,
+      saved: saved, savedFrom: savedFrom, savedDays: savedDays, planToDate: planToDate, spentToDate: spentToDate, projectedSave: projectedSave,
       daysToTarget: diffDays(today, target), alerts: alerts, status: status
     };
   }

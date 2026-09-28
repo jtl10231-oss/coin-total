@@ -163,7 +163,7 @@ function renderHome() {
   var h = '';
   h += '<div class="hero"><div class="hero-top"><b>쮸앤택 Runway</b><span class="pill ' + r.status + '">' + lv(r.status) + '</span></div>';
   h += '<div class="hero-sub">우리의 1년 Runway · ' + esc(S.periodStart) + ' ~ ' + esc(C.addDays(S.targetDate, -1)) + ' · 나: ' + esc(ME) + '</div>';
-  h += '<div class="hero-nums"><div><small>목표자금</small><b>' + won(r.budgetTotal) + '</b></div><div><small>확보 자금</small><b>' + (havePx ? won(r.secured) : '시세 확인 중') + '</b></div><div><small>남은 기간</small><b>D-' + Math.max(0, r.daysToTarget) + '</b></div></div></div>';
+  h += '<div class="hero-nums"><div><small>목표자금</small><b>' + won(r.budgetTotal) + '</b></div><div><small>확보 자금</small><b>' + (havePx ? won(r.secured) : '시세 확인 중') + '</b></div><div><small>남은 기간</small><b>D-' + Math.max(0, r.daysToTarget) + '</b></div></div>' + (r.saved != null ? '<div class="hero-save">월 ' + man(r.planMonthly) + ' 계획 대비 ' + (r.saved >= 0 ? '아낀 돈 <b>+' + won(r.saved) + '</b>' : '더 쓴 돈 <b>' + won(-r.saved) + '</b>') + ' (' + r.savedDays + '일)</div>' : '') + '</div>';
   var shown = r.alerts.filter(function (a) { return a.key !== 'setup' || true; });
   if (shown.length) { h += '<div class="alerts">'; shown.forEach(function (a) { h += '<div class="al ' + a.level + '"><b>' + esc(a.title) + '</b><span>' + esc(a.detail) + '</span></div>'; }); h += '</div>'; }
 
@@ -187,12 +187,20 @@ function renderHome() {
   h += '<div class="row total"><span class="k">' + (r.surplus >= 0 ? '여유자금' : '부족자금') + '</span><span class="v ' + (r.surplus >= 0 ? 'good' : 'bad') + '">' + (havePx ? C.signWon(r.surplus) : '-') + '</span></div>';
   h += '<div class="sub">코인이 올라도 예산은 늘지 않아요. 오른 만큼은 여유자금으로만 표시돼요.</div></div>';
 
-  // 3. 남은 예산
-  h += '<div class="card"><h3>3. 남은 예산 <small>쓴 돈은 공금통장 잔액 변화로 계산</small></h3>';
+  // 3. 계획 대비 (아낀 돈) + 남은 예산
+  h += '<div class="card"><h3>3. 계획 대비 <small>월 ' + man(r.planMonthly) + ' 쓰는 계획 기준</small></h3>';
+  if (r.saved == null) {
+    h += '<div class="sub">' + (r.today < S.periodStart ? '계획 시작일(' + md(S.periodStart) + ')부터 잔액 기록으로 계산돼요.' : '공금통장 잔액을 입력하면 계산돼요.') + '</div>';
+  } else {
+    h += '<div class="row"><span class="k">' + (r.saved >= 0 ? '지금까지 아낀 돈' : '지금까지 더 쓴 돈') + '</span><span class="v"><b class="' + (r.saved >= 0 ? 'good' : 'bad') + '" style="font-size:20px">' + (r.saved >= 0 ? '+' : '-') + won(Math.abs(r.saved)) + '</b></span></div>';
+    h += '<div class="hint" style="margin-top:0">' + md(r.savedFrom) + '~오늘 ' + r.savedDays + '일: 계획대로면 ' + won(r.planToDate) + ' 쓸 걸 실제로 ' + won(r.spentToDate) + ' 썼어요 (잔액 변화로 계산)</div>';
+    if (r.projectedSave != null) h += '<div class="row"><span class="k">지금 속도면 ' + md(S.targetDate) + '까지 (예상)</span><span class="v ' + (r.projectedSave >= 0 ? 'good' : 'bad') + '">' + (r.projectedSave >= 0 ? '+' + won(r.projectedSave) + ' 아낌' : won(-r.projectedSave) + ' 더 씀') + '</span></div>';
+    else h += '<div class="hint">잔액 기록이 ' + r.settings.alert.minBurnDays + '일치 쌓이면 목표일까지 얼마나 아낄지 예상해 드려요.</div>';
+  }
   [['life', '생활 (공동)', 'var(--life)'], ['personal', '개인 (택)', 'var(--personal)'], ['company', '회사', 'var(--company)']].forEach(function (b) {
     var tot = +S.budgets[b[0]] || 0, rem = r.remaining[b[0]], p = tot ? Math.max(0, rem) / tot : 0;
     if (!tot && !r.used[b[0]]) return;
-    h += '<div class="bucket"><div class="top"><span><i class="dot" style="background:' + b[2] + '"></i><b>' + b[1] + '</b></span><span><b class="' + (rem < 0 ? 'bad' : '') + '">' + won(rem) + '</b> <span class="muted">/ ' + man(tot) + '</span></span></div>';
+    h += '<div class="bucket" style="border-top:1px solid var(--line);margin-top:8px"><div class="top"><span><i class="dot" style="background:' + b[2] + '"></i><b>' + b[1] + ' 남은 예산</b></span><span><b class="' + (rem < 0 ? 'bad' : '') + '">' + won(rem) + '</b> <span class="muted">/ ' + man(tot) + '</span></span></div>';
     h += '<div class="bar"><i style="width:' + (p * 100) + '%;background:' + b[2] + '"></i></div><div class="sub">쓴 돈 ' + won(r.used[b[0]]) + ' · 남은 비율 ' + Math.round(p * 100) + '%</div></div>';
   });
   h += '</div>';
