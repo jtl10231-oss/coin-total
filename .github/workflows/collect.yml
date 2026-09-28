@@ -19,7 +19,10 @@ jobs:
           node-version: 20
       - name: watchdog (scheduled)
         if: github.event_name == 'schedule'
+        env:
+          RUNWAY_DISPATCH_TOKEN: ${{ secrets.RUNWAY_DISPATCH_TOKEN }}
         run: |
+          bash runway_tick.sh || true
           running=$(gh run list -R "$GITHUB_REPOSITORY" --workflow collect.yml --event workflow_dispatch --status in_progress --json databaseId --jq 'length')
           queued=$(gh run list -R "$GITHUB_REPOSITORY" --workflow collect.yml --event workflow_dispatch --status queued --json databaseId --jq 'length')
           echo "running=$running queued=$queued"
@@ -27,11 +30,14 @@ jobs:
           if [ "$running" = "0" ] && [ "$queued" = "0" ]; then gh workflow run collect.yml -R "$GITHUB_REPOSITORY" --ref main; fi
       - name: collect every minute (about 5h40m)
         if: github.event_name == 'workflow_dispatch'
+        env:
+          RUNWAY_DISPATCH_TOKEN: ${{ secrets.RUNWAY_DISPATCH_TOKEN }}
         run: |
           end=$(( $(date +%s) + 340*60 ))
           while [ "$(date +%s)" -lt "$end" ]; do
             start=$(date +%s)
             bash publish.sh || echo "publish failed, retry next minute"
+            bash runway_tick.sh || true
             took=$(( $(date +%s) - start ))
             if [ "$took" -lt 60 ]; then sleep $(( 60 - took )); fi
           done
