@@ -2,7 +2,7 @@
 import fs from 'fs';
 import { execSync } from 'child_process';
 const OUT = process.argv[2] || 'forecast.json';
-const HOLD = { SOL: { qty: 42.32, buy: 165000, cg: 'solana' }, WLD: { qty: 4126.54, buy: 730, cg: 'worldcoin-wld' } };
+const HOLD = { SOL: { qty: 126.96, buy: 165000, cg: 'solana' }, WLD: { qty: 12379.62, buy: 730, cg: 'worldcoin-wld' } };
 const HORIZONS = [1, 3, 7, 14];
 const TILT = 0.25;              // 센티멘트가 중앙값을 움직이는 최대 폭 = 표준편차의 25%
 const MIN_INTERVAL = 55 * 60000; // 약 1시간에 한 번만 다시 계산
@@ -10,7 +10,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 let prev = null;
 try { prev = JSON.parse(execSync('git show origin/data:forecast.json', { stdio: ['ignore', 'pipe', 'ignore'] }).toString()); } catch {}
 if (!prev && fs.existsSync(OUT)) { try { prev = JSON.parse(fs.readFileSync(OUT, 'utf8')); } catch {} }
-if (prev && Date.now() - prev.updated < MIN_INTERVAL && !process.env.FORCE) { fs.writeFileSync(OUT, JSON.stringify(prev)); console.log('skip (recent)'); process.exit(0); }
+const HOLD_KEY = JSON.stringify(HOLD);
+if (prev && prev.holdKey === HOLD_KEY && Date.now() - prev.updated < MIN_INTERVAL && !process.env.FORCE) { fs.writeFileSync(OUT, JSON.stringify(prev)); console.log('skip (recent)'); process.exit(0); }
 
 async function j(u) {
   for (let i = 0; i < 3; i++) {
@@ -107,6 +108,7 @@ const forecast = HORIZONS.map(hd => {
 });
 const res = {
   updated: Date.now(),
+  holdKey: HOLD_KEY,
   market,
   SOL: { price: coins.SOL.price, sigmaDaily: coins.SOL.sigmaDaily, sentiment: coins.SOL.sentiment, used: Math.round(combined('SOL')) },
   WLD: { price: coins.WLD.price, sigmaDaily: coins.WLD.sigmaDaily, sentiment: coins.WLD.sentiment, used: Math.round(combined('WLD')) },

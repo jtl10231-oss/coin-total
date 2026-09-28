@@ -58,7 +58,7 @@ table.fc tr.grp td{font-weight:700;color:#1a1f36;background:#f7f8fb;padding:6px 
 <div class="err" id="err"></div>
 </div>
 <script>
-const coins=[{sym:'SOL',name:'솔라나',qty:42.32,buy:165000},{sym:'WLD',name:'월드코인',qty:4126.54,buy:730}];
+const coins=[{sym:'SOL',name:'솔라나',qty:126.96,buy:165000},{sym:'WLD',name:'월드코인',qty:12379.62,buy:730}];
 const won=n=>Math.round(n).toLocaleString('ko-KR')+'원';
 const sign=n=>(n>=0?'+':'-');
 document.getElementById('list').innerHTML=coins.map(c=>`<div class="card"><div class="row"><div>
@@ -102,7 +102,7 @@ async function loadHistory(){
     const cur=Math.floor(Date.now()/STEP)*STEP;h.SOL.forEach((v,i)=>{const t=h.t0+i*h.step;if(t<cur)series.set(t,totalOf(v,h.WLD[i]))});drawChart();
   }catch(e){document.getElementById('tip').textContent='지난 기록을 불러오지 못했어요. 지금부터 쌓이는 값만 보여요.'}
 }
-const LS='liveTotals';
+const LS='liveTotals_'+coins.map(c=>c.qty).join('_');
 try{const o=JSON.parse(localStorage.getItem(LS)||'{}');const cut=Date.now()-7*1440*STEP;Object.entries(o).forEach(([t,v])=>{if(+t>=cut)series.set(+t,v)})}catch(e){}
 let lastSave=0;
 function addLive(){if(coins.some(c=>c.price==null))return;const t=Math.floor(Date.now()/STEP)*STEP;series.set(t,totalOf(coins[0].price,coins[1].price));
