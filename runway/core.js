@@ -67,6 +67,10 @@
     var recs = all.filter(function (r) { return !r.canceled && r.type !== 'memo'; });
     var init = S.initial || {};
     var from = init.asOf || '0000-00-00', target = S.targetDate;
+    // 목표 기간 개월 수 (예: 2026-10 ~ 2027-08 = 11개월). 생활 예산은 월 생활비 × 개월 수로 자동 (budgetAuto가 false면 직접 정한 값)
+    var monthsInPeriod = 0;
+    if (S.periodStart && target) { for (var mm = ymOf(S.periodStart), lastM = ymOf(addDays(target, -1)); mm <= lastM; mm = addMonths(mm, 1)) monthsInPeriod++; }
+    if (S.budgetAuto !== false && monthsInPeriod > 0) S.budgets.life = num(S.monthly.life) * monthsInPeriod;
     var planMonthly = num(S.monthly.life) + num(S.monthly.personal);
 
     // 1) 코인, 현금, 공금통장으로 들어오고 나가는 돈
@@ -191,6 +195,8 @@
     var mainMonthly = burnReady ? Math.max(0, burnMonthly) : planMonthly;
     var main = pace || plan;
     var jointOnly = simulate(Object.assign({}, base, { pool: balance + cash, monthly: mainMonthly }));
+    var recurringMonthly = sum((S.recurring || []).filter(function (c) { var nm = addMonths(ym, 1); return c && c.from <= nm && c.to >= nm; }), function (c) { return c.amount; });
+    var monthlyGap = Math.max(0, mainMonthly - recurringMonthly);
 
     // 7) 경고 (앱 화면)
     var alerts = [];
@@ -226,7 +232,7 @@
       burnDaily: burnDaily, burnMonthly: burnMonthly, burnDays: burnDays, burnReady: burnReady, spentThisMonth: spentThisMonth,
       expected: expected, expectedFuture: expectedFuture, autoDeps: autoDeps, skipped: skipped,
       assetsNow: assetsNow, pool: assetsNow, secured: secured, used: used, remaining: remaining, need: need, budgetTotal: budgetTotal, coverage: need > 0 ? secured / need : null, surplus: surplus,
-      planMonthly: planMonthly, mainMonthly: mainMonthly, plan: plan, pace: pace, main: main, jointOnly: jointOnly, planned: planned, overdue: overdue,
+      planMonthly: planMonthly, mainMonthly: mainMonthly, monthsInPeriod: monthsInPeriod, recurringMonthly: recurringMonthly, monthlyGap: monthlyGap, plan: plan, pace: pace, main: main, jointOnly: jointOnly, planned: planned, overdue: overdue,
       daysToTarget: diffDays(today, target), alerts: alerts, status: status
     };
   }

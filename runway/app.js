@@ -179,7 +179,7 @@ function renderHome() {
   h += '<div class="sub">쮸 입금 예정 = 앞으로 들어올 ' + r.expected.length + '번. 입금일이 지나면 공금통장 쪽으로 옮겨가요. 코인 판 돈(누계 ' + won(r.cashed) + ')은 공금통장에 들어간 걸로 계산해요.</div></div>';
 
   // 2. 목표자금
-  h += '<div class="card"><h3>2. 1년 목표자금 <small>생활 ' + man(S.budgets.life) + (+S.budgets.personal ? ' + 개인 ' + man(S.budgets.personal) : '') + (+S.budgets.company ? ' + 회사 ' + man(S.budgets.company) : '') + '</small></h3>';
+  h += '<div class="card"><h3>2. 목표자금 <small>생활 ' + man(S.budgets.life) + (S.budgetAuto !== false && r.monthsInPeriod ? ' (월 ' + man(S.monthly.life) + ' × ' + r.monthsInPeriod + '개월)' : '') + (+S.budgets.personal ? ' + 개인 ' + man(S.budgets.personal) : '') + (+S.budgets.company ? ' + 회사 ' + man(S.budgets.company) : '') + '</small></h3>';
   h += '<div class="row"><span class="k">확보 자금 (도넛 합계)</span><span class="v">' + (havePx ? won(r.secured) : '-') + '</span></div>';
   h += '<div class="row"><span class="k">앞으로 필요한 돈 (예산 − 쓴 돈)</span><span class="v">' + won(r.need) + '</span></div>';
   h += '<div class="row"><span class="k">확보율</span><span class="v">' + (havePx ? pct(r.coverage) : '-') + '</span></div>';
@@ -224,6 +224,11 @@ function renderHome() {
     else h += '<div class="sub">5년 넘게 버텨요' + (mm.atTarget != null ? ' · 목표일에 남는 돈 ' + won(mm.atTarget) : '') + '</div>';
     h += '<div class="row" style="margin-top:8px"><span class="k">소비 속도 기준' + (r.burnReady ? ' (월 ' + man(r.burnMonthly) + ')' : '') + '</span><span class="v">' + (r.pace ? C.monthsText(r.pace.months) : '잔액 기록 ' + r.settings.alert.minBurnDays + '일치 필요') + '</span></div>';
     h += '<div class="row"><span class="k">계획 기준 (월 ' + man(r.planMonthly) + ')</span><span class="v">' + C.monthsText(r.plan.months) + '</span></div>';
+    if (r.monthlyGap > 0) {
+      var sellEq = []; if (PRICES.SOL) sellEq.push('SOL ' + (Math.ceil(r.monthlyGap / PRICES.SOL * 100) / 100) + '개'); if (PRICES.WLD) sellEq.push('WLD ' + Math.ceil(r.monthlyGap / PRICES.WLD).toLocaleString('ko-KR') + '개');
+      h += '<div class="row"><span class="k">매달 코인에서 채울 돈</span><span class="v">월 ' + won(r.monthlyGap) + '</span></div>';
+      h += '<div class="hint" style="margin-top:0">월 ' + man(r.mainMonthly) + ' 쓰는데 정기 입금이 ' + man(r.recurringMonthly) + '이라서, 모자란 만큼 코인을 팔아야 해요. 지금 시세로 ' + sellEq.join(' 또는 ') + ' (계산값일 뿐 매도 권유 아님)</div>';
+    }
     h += '<div class="row"><span class="k">코인 안 팔고 공금통장만으로</span><span class="v ' + (r.jointOnly.exhaust && C.diffDays(r.today, r.jointOnly.exhaust) <= 30 ? 'warnc' : '') + '">' + (r.jointOnly.exhaust ? r.jointOnly.exhaust + '까지' : '5년 이상') + '</span></div>';
     if (r.expectedFuture > 0) h += '<div class="hint">앞으로 들어올 쮸 입금 ' + won(r.expectedFuture) + '을 넣어서 계산했어요. 공금통장이 바닥나기 전에 코인을 팔아 채우는 걸로 봐요.</div>';
   }
@@ -467,10 +472,10 @@ function renderSet() {
   h += '<div class="card"><h3>계획</h3>';
   h += '<label class="f">계획 시작일</label><input id="p_start" type="date" value="' + esc(S.periodStart) + '">';
   h += '<label class="f">목표일 (이 날 전까지 버티기)</label><input id="p_target" type="date" value="' + esc(S.targetDate) + '">';
-  h += '<label class="f">생활(공동) 예산 총액</label><input id="p_bl" inputmode="numeric" value="' + (+S.budgets.life).toLocaleString('ko-KR') + '">';
+  h += '<label class="f">생활(공동) 목표자금</label><div class="sub" style="padding:10px 0">월 생활비 × 목표 기간 개월 수로 자동 계산돼요. 지금 ' + won(r.budgetTotal - (+S.budgets.personal || 0) - (+S.budgets.company || 0)) + ' (월 ' + man(S.monthly.life) + ' × ' + r.monthsInPeriod + '개월)</div>';
   h += '<label class="f">개인 예산 총액</label><input id="p_bp" inputmode="numeric" value="' + (+S.budgets.personal).toLocaleString('ko-KR') + '">';
   h += '<label class="f">회사 예산 총액</label><input id="p_bc" inputmode="numeric" value="' + (+S.budgets.company).toLocaleString('ko-KR') + '">';
-  h += '<label class="f">월 생활비 계획 (공금통장에서 쓰는 돈)</label><input id="p_ml" inputmode="numeric" value="' + (+S.monthly.life).toLocaleString('ko-KR') + '">';
+  h += '<label class="f">월 생활비 (공금통장에서 쓸 수 있는 돈)</label><input id="p_ml" inputmode="numeric" value="' + (+S.monthly.life).toLocaleString('ko-KR') + '">';
   h += '<label class="f">월 개인비 계획 (0이면 계산에서 빠짐)</label><input id="p_mp" inputmode="numeric" value="' + (+S.monthly.personal).toLocaleString('ko-KR') + '">';
   h += '<button class="btn" id="p_save">계획 저장</button></div>';
   var rc = (S.recurring && S.recurring[0]) || { who: '쮸', amount: 0, day: 1, from: S.periodStart.slice(0, 7), to: C.addMonths(S.targetDate.slice(0, 7), -1) };
@@ -513,9 +518,10 @@ function renderSet() {
   };
   var sc = $('#s_conf'); if (sc) sc.onclick = function () { doSave(function (L) { L.settings.confirmed = true; }, '시작 숫자 확인', '확인 완료로 표시했어요'); };
   $('#p_save').onclick = function () {
-    var ns = { periodStart: v('p_start'), targetDate: v('p_target'), budgets: { life: parseNum(v('p_bl')), personal: parseNum(v('p_bp')), company: parseNum(v('p_bc')) }, monthly: { life: parseNum(v('p_ml')), personal: parseNum(v('p_mp')) } };
+    var ns = { periodStart: v('p_start'), targetDate: v('p_target'), budgetAuto: true, budgets: { life: 0, personal: parseNum(v('p_bp')), company: parseNum(v('p_bc')) }, monthly: { life: parseNum(v('p_ml')), personal: parseNum(v('p_mp')) } };
+    var mo = 0; if (ns.periodStart && ns.targetDate && ns.targetDate > ns.periodStart) { for (var mm = ns.periodStart.slice(0, 7); mm <= C.addDays(ns.targetDate, -1).slice(0, 7); mm = C.addMonths(mm, 1)) mo++; } ns.budgets.life = (ns.monthly.life || 0) * mo;
     if (!ns.periodStart || !ns.targetDate || ns.targetDate <= ns.periodStart) return toast('날짜를 확인해 주세요');
-    if ([ns.budgets.life, ns.budgets.personal, ns.budgets.company, ns.monthly.life, ns.monthly.personal].some(function (x) { return !isFinite(x) || x < 0; })) return toast('금액을 확인해 주세요');
+    if ([ns.budgets.personal, ns.budgets.company, ns.monthly.life, ns.monthly.personal].some(function (x) { return !isFinite(x) || x < 0; })) return toast('금액을 확인해 주세요');
     doSave(function (L) { Object.assign(L.settings, ns); }, '계획 변경', '계획을 저장했어요');
   };
   $('#r_save').onclick = function () {
