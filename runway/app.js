@@ -166,6 +166,10 @@ function renderHome() {
   h += '<div class="sub">현금화 누계 ' + won(r.cashed) + ' · 법인 잔액 ' + won(r.corp) + '은 회사 쪽으로 따로 봐요</div></div>';
   // 2 목표자금
   h += '<div class="card"><h3>2. 1년 목표자금 <small>예산 ' + man(S.budgets.life) + ' + ' + man(S.budgets.personal) + ' + ' + man(S.budgets.company) + '</small></h3>';
+  var recN = (S.recurring || []).filter(function (c) { return c && +c.amount > 0; });
+  h += '<div class="row"><span class="k">현재 자산 (코인+현금)</span><span class="v">' + (havePx ? won(r.pool) : '-') + '</span></div>';
+  h += '<div class="row"><span class="k">앞으로 들어올 입금' + (recN.length ? ' (' + recN.map(function (c) { return esc(c.who) + ' 월 ' + man(c.amount); }).join(', ') + ' × ' + r.expected.length + '번)' : '') + '</span><span class="v">' + won(r.expectedFuture) + '</span></div>';
+  h += '<div class="row"><span class="k"><b>확보 자금</b></span><span class="v">' + (havePx ? won(r.secured) : '-') + '</span></div>';
   h += '<div class="row"><span class="k">앞으로 필요한 돈</span><span class="v">' + won(r.need) + '</span></div>';
   h += '<div class="row"><span class="k">확보율</span><span class="v">' + (havePx ? pct(r.coverage) : '-') + '</span></div>';
   h += '<div class="bar"><i style="width:' + Math.min(100, (r.coverage || 0) * 100) + '%;background:' + (r.surplus >= 0 ? 'var(--ok)' : 'var(--danger)') + '"></i></div>';
@@ -185,12 +189,13 @@ function renderHome() {
   h += '<div class="row"><span class="k">공금통장(토스뱅크) 잔액</span><span class="v">' + (jbx ? won(jbx.amount) : '입력 전') + ' <button class="mini" id="jbEdit">수정</button></span></div>';
   if (jbx) h += '<div class="hint" style="margin:-2px 0 4px;text-align:right">' + esc(jbx.by) + ' · ' + esc(jbx.date) + ' 수정</div>';
   h += '<div class="row"><span class="k">이번 달 공금통장 입금</span><span class="v">택 ' + won(tm.jointBy['택'] || 0) + ' · 쮸 ' + won(tm.jointBy['쮸'] || 0) + '</span></div>';
-  h += '<div class="row"><span class="k">생활비 (런웨이에서, 예정 ' + won(ml) + ')</span><span class="v">' + won(tm.life) + '</span></div>';
+  (r.contribNow || []).forEach(function (c) { h += '<div class="row"><span class="k">' + esc(c.who) + ' 정기 입금 (' + (+c.due.slice(8)) + '일 ' + won(c.amount) + ')</span><span class="v ' + (c.left > 0 ? 'warnc' : 'good') + '">' + (c.left > 0 ? (c.got > 0 ? won(c.left) + ' 남음' : '아직') : '들어옴') + '</span></div>'; });
+  h += '<div class="row"><span class="k">생활비 (공금통장으로 간 돈, 한도 ' + won(ml) + ')</span><span class="v">' + won(tm.life) + '</span></div>';
   h += '<div class="row"><span class="k">카드값 (한도 ' + won(mp) + ')</span><span class="v">' + won(tm.card) + '</span></div>';
   if (tm.expense) h += '<div class="row"><span class="k">기타 지출</span><span class="v">' + won(tm.expense) + '</span></div>';
   h += '<div class="row"><span class="k">회사 사용액</span><span class="v">' + won(tm.corpSpend) + '</span></div>';
-  h += '<div class="row total"><span class="k">이번 달 런웨이 총 소진</span><span class="v">' + won(tm.total) + '</span></div>';
-  h += '<div class="sub">생활 ' + (ml ? Math.round(tm.life / ml * 100) : 0) + '% · 개인 ' + (mp ? Math.round(tm.personal / mp * 100) : 0) + '% 사용 (월 한도 대비). 각자 개인 돈으로 넣은 입금은 런웨이 소진에 안 들어가요.</div></div>';
+  h += '<div class="row total"><span class="k">이번 달 총 소진</span><span class="v">' + won(tm.total) + '</span></div>';
+  h += '<div class="sub">생활 ' + (ml ? Math.round(tm.life / ml * 100) : 0) + '% · 개인 ' + (mp ? Math.round(tm.personal / mp * 100) : 0) + '% 사용 (월 한도 대비). 공금통장에 들어간 돈은 누가 넣었든 생활비로 잡혀요. 정기 입금 예정분은 확보 자금에 미리 들어가 있어요.</div></div>';
   // 5 런웨이
   var p = r.plan;
   h += '<div class="card"><h3>5. 남은 런웨이 <small>계획대로 쓰면</small></h3>';
@@ -201,11 +206,13 @@ function renderHome() {
     h += '<div class="row" style="margin-top:8px"><span class="k">최근 소비 속도면</span><span class="v">' + (r.pace ? C.monthsText(r.pace.months) + ' (월 ' + won(r.paceL) + ')' : '한 달 기록이 쌓이면 계산') + '</span></div>';
     h += '<div class="row"><span class="k">회사 돈을 떼어 두면 생활비</span><span class="v">' + (r.lifeMonths == null ? '-' : C.monthsText(Math.max(0, r.lifeMonths))) + '</span></div>';
     h += '<div class="row"><span class="k">회사 런웨이</span><span class="v">' + (r.corpMonths == null ? '회사 사용액 기록 필요' : C.monthsText(r.corpMonths)) + '</span></div>';
+    if (r.expectedFuture > 0) h += '<div class="hint">앞으로 들어올 정기 입금 ' + won(r.expectedFuture) + '을 넣어서 계산했어요.</div>';
     if (r.reserveNow > 0) h += '<div class="hint">날짜를 안 정한 회사 준비금 ' + won(r.reserveNow) + '은 바로 빠진다고 보고 계산했어요. 날짜가 정해지면 기록 → 예정 출금에 넣어 주세요.</div>';
   }
   h += '</div>';
   // 예정 출금
-  h += '<div class="card"><h3>앞으로 예정된 출금</h3>';
+  h += '<div class="card"><h3>앞으로 예정된 입금·출금</h3>';
+  r.expected.slice(0, 3).forEach(function (e) { h += '<div class="row"><span class="k">' + esc(e.due) + ' · ' + esc(e.who) + ' 공금통장 입금 예정</span><span class="v good">+' + won(e.amount) + '</span></div>'; });
   if (!r.planned.length) h += '<div class="sub">예정된 큰 출금이 없어요. (월 생활비·카드값은 자동으로 계산에 들어가요)</div>';
   r.planned.slice(0, 8).forEach(function (x) { h += '<div class="row"><span class="k">' + esc(x.date) + ' · ' + (x.kind === 'corp' ? '법인 입금' : '기타') + (x.memo ? ' · ' + esc(x.memo) : '') + '</span><span class="v">' + won(x.amount) + '</span></div>'; });
   h += '</div>';
@@ -236,7 +243,7 @@ function field(k, label, kind, def) {
   var recs = LEDGER.records || [];
   if (kind === 'date') return x + '<input id="' + id + '" type="date" value="' + today() + '">';
   if (kind === 'who') return x + '<select id="' + id + '"><option value="택"' + (ME === '택' ? ' selected' : '') + '>택</option><option value="쮸"' + (ME === '쮸' ? ' selected' : '') + '>쮸</option></select>';
-  if (kind === 'src') return x + '<select id="' + id + '"><option value="pool"' + (ME === '쮸' ? '' : ' selected') + '>런웨이 자산에서 (코인 판 돈·현금)</option><option value="own"' + (ME === '쮸' ? ' selected' : '') + '>각자 개인 돈에서 (월급 등)</option></select><div class="hint">런웨이 자산에서 넣은 돈은 생활 예산에서 빠지고, 개인 돈으로 넣은 돈은 누가 얼마 넣었는지만 기록돼요.</div>';
+  if (kind === 'src') return x + '<select id="' + id + '"><option value="pool"' + (ME === '쮸' ? '' : ' selected') + '>런웨이 자산에서 (코인 판 돈·현금)</option><option value="own"' + (ME === '쮸' ? ' selected' : '') + '>각자 개인 돈에서 (월급 등)</option></select><div class="hint">둘 다 생활비로 잡혀요. 런웨이 자산에서 넣으면 런웨이 현금이 줄고, 개인 돈으로 넣으면 런웨이 현금은 그대로이고 그달 정기 입금 예정에서 빠져요.</div>';
   if (kind === 'month') return x + '<input id="' + id + '" type="month" value="' + today().slice(0, 7) + '">';
   if (kind === 'coin') return x + '<select id="' + id + '"><option value="SOL">SOL (솔라나)</option><option value="WLD">WLD (월드코인)</option></select>';
   if (kind === 'num') return x + '<input id="' + id + '" type="text" inputmode="decimal" placeholder="예: 3">';
@@ -429,6 +436,14 @@ function renderSet() {
   h += '<label class="f">카드 결제일 (매월)</label><input id="p_card" inputmode="numeric" value="' + S.cardDay + '">';
   h += '<label class="f">회사 월 예상 사용액 (사용액 기록 전까지 회사 런웨이 계산용)</label><input id="p_cg" inputmode="numeric" value="' + (+S.companyMonthlyGuess || 0).toLocaleString('ko-KR') + '">';
   h += '<button class="btn" id="p_save">계획 저장</button></div>';
+  var rc = (S.recurring && S.recurring[0]) || { who: '쮸', amount: 0, day: 1, from: S.periodStart.slice(0, 7), to: C.addMonths(S.targetDate.slice(0, 7), -1) };
+  h += '<div class="card"><h3>정기 입금 예정 <small>확보 자금과 런웨이에 들어가요</small></h3>';
+  h += '<label class="f">누가</label><select id="r_who"><option value="쮸"' + (rc.who === '쮸' ? ' selected' : '') + '>쮸</option><option value="택"' + (rc.who === '택' ? ' selected' : '') + '>택</option></select>';
+  h += '<label class="f">매월 금액 (0이면 끄기)</label><input id="r_amt" inputmode="numeric" value="' + (+rc.amount || 0).toLocaleString('ko-KR') + '">';
+  h += '<label class="f">매월 입금일</label><input id="r_day" inputmode="numeric" value="' + (rc.day || 1) + '">';
+  h += '<label class="f">시작 월 / 끝 월</label><div class="two"><input id="r_from" type="month" value="' + esc(rc.from) + '"><input id="r_to" type="month" value="' + esc(rc.to) + '"></div>';
+  h += '<div class="hint">그달 실제 입금을 "공금통장 입금(개인 돈에서)"으로 기록하면 예정에서 빠져요. 이 입금이 공동 생활비를 채운다고 보고 계산해요.</div>';
+  h += '<button class="btn" id="r_save">정기 입금 저장</button></div>';
   h += '<div class="card"><h3>알림 기준</h3>';
   h += '<label class="f">이번 달 주의 / 위험 (한도 대비 %)</label><div class="two"><input id="a_mw" inputmode="numeric" value="' + Math.round(A.monthWarn * 100) + '"><input id="a_md" inputmode="numeric" value="' + Math.round(A.monthDanger * 100) + '"></div>';
   h += '<label class="f">소비 속도 주의 / 위험 (계획 대비 %)</label><div class="two"><input id="a_pw" inputmode="numeric" value="' + Math.round(A.paceWarn * 100) + '"><input id="a_pd" inputmode="numeric" value="' + Math.round(A.paceDanger * 100) + '"></div>';
@@ -467,6 +482,11 @@ function renderSet() {
     if (!ns.periodStart || !ns.targetDate || ns.targetDate <= ns.periodStart) return toast('날짜를 확인해 주세요');
     if ([ns.budgets.life, ns.budgets.personal, ns.budgets.company, ns.monthly.life, ns.monthly.personal].some(function (x) { return !isFinite(x) || x < 0; })) return toast('금액을 확인해 주세요');
     doSave(function (L) { Object.assign(L.settings, ns); }, '계획 변경', '계획을 저장했어요');
+  };
+  $('#r_save').onclick = function () {
+    var nr = { who: v('r_who'), amount: parseNum(v('r_amt')) || 0, day: Math.min(28, Math.max(1, parseNum(v('r_day')) || 1)), from: v('r_from'), to: v('r_to') };
+    if (nr.amount > 0 && (!nr.from || !nr.to || nr.to < nr.from)) return toast('시작 월과 끝 월을 확인해 주세요');
+    doSave(function (L) { L.settings.recurring = nr.amount > 0 ? [nr] : []; }, '정기 입금 예정 변경', '정기 입금을 저장했어요');
   };
   $('#a_save').onclick = function () {
     var na = { monthWarn: parseNum(v('a_mw')) / 100, monthDanger: parseNum(v('a_md')) / 100, paceWarn: parseNum(v('a_pw')) / 100, paceDanger: parseNum(v('a_pd')) / 100, cushionMonths: parseNum(v('a_cu')), dropWarn: parseNum(v('a_dw')), bigRecord: parseNum(v('a_big')) };

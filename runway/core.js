@@ -49,7 +49,7 @@
     var curDaysLeft = dim(tYm) - (+o.today.slice(8, 10)) + 1;
     while (d <= cap) {
       if (d === o.target) out.atTarget = P;
-      var spend = o.plannedByDate[d] || 0;
+      var spend = (o.plannedByDate[d] || 0) - ((o.inflowByDate && o.inflowByDate[d]) || 0);
       if (d >= o.start) {
         var m = ymOf(d);
         spend += (m === tYm) ? o.curMonthLeft / curDaysLeft : o.monthly / dim(m);
@@ -83,7 +83,7 @@
       var a = num(r.amount);
       switch (r.type) {
         case 'sale': hold[r.coin] = num(hold[r.coin]) - num(r.qty); cash += num(r.krw); cashed += num(r.krw); break;
-        case 'joint': if (r.src !== 'own') { cash -= a; if (inPlan(r)) used.life += a; } break;
+        case 'joint': if (r.src !== 'own') cash -= a; if (inPlan(r)) used.life += a; break;
         case 'card': cash -= a; if (inPlan(r)) used.personal += a; break;
         case 'expense': cash -= a; if (inPlan(r) && used[r.bucket] != null) used[r.bucket] += a; break;
         case 'corp_in': cash -= a; corp += a; if (inPlan(r)) used.company += a; break;
@@ -113,7 +113,7 @@
       var o = { joint: 0, jointOwn: 0, jointBy: {}, card: 0, expense: 0, expLife: 0, expPersonal: 0, corpSpend: 0, corpIn: 0 };
       rs.forEach(function (r) {
         var a = num(r.amount);
-        if (r.type === 'joint') { var w = r.who || r.by || '?'; o.jointBy[w] = (o.jointBy[w] || 0) + a; if (r.src === 'own') o.jointOwn += a; else o.joint += a; }
+        if (r.type === 'joint') { var w = r.who || r.by || '?'; o.jointBy[w] = (o.jointBy[w] || 0) + a; o.joint += a; if (r.src === 'own') o.jointOwn += a; }
         else if (r.type === 'card') o.card += a;
         else if (r.type === 'expense') { o.expense += a; if (r.bucket === 'life') o.expLife += a; if (r.bucket === 'personal') o.expPersonal += a; }
         else if (r.type === 'corp_spend') o.corpSpend += a;
@@ -134,6 +134,26 @@
     for (var i = 1; i <= 3; i++) { var m = addMonths(ym, -i); if (m >= ymOf(start)) paceMonths.push(m); }
     var paceL = paceMonths.length ? sum(paceMonths, function (m) { return monthOf(m).living; }) / paceMonths.length : null;
 
+    // 정기 입금 예정 (예: 쮸 매월 1일 250만원 → 공금통장). 그달 실제 입금 기록이 있으면 그만큼 예정에서 뺌
+    var ownBy = {};
+    recs.forEach(function (r) { if (r.type === 'joint' && r.src === 'own') { var k = ymOf(r.date) + '|' + (r.who || r.by); ownBy[k] = (ownBy[k] || 0) + num(r.amount); } });
+    var expected = [], expectedFuture = 0, contribMissed = [], contribNow = [];
+    (S.recurring || []).forEach(function (c) {
+      if (!c || !(num(c.amount) > 0) || !c.from || !c.to) return;
+      for (var m = c.from; m <= c.to; m = addMonths(m, 1)) {
+        var got = ownBy[m + '|' + c.who] || 0, left = Math.max(0, num(c.amount) - got);
+        var due = m + '-' + String(c.day || 1).padStart(2, '0');
+        if (m === ym) contribNow.push({ who: c.who, amount: num(c.amount), got: got, left: left, due: due });
+        if (m < ym) { if (left > 0 && m >= ymOf(from)) contribMissed.push({ who: c.who, month: m, left: left }); continue; }
+        if (left > 0) { expected.push({ who: c.who, month: m, due: due, date: due < today ? today : due, amount: left }); expectedFuture += left; }
+      }
+    });
+    var inflowByDate = {};
+    expected.forEach(function (e) { inflowByDate[e.date] = (inflowByDate[e.date] || 0) + e.amount; });
+    var secured = pool + expectedFuture;
+    surplus = secured - need;
+    var inflowNextMonth = function (m) { return sum(expected.filter(function (e) { return e.month === m; }), function (e) { return e.amount; }); };
+
     // 예정 출금
     var plannedAll = all.filter(function (r) { return r.type === 'planned' && !r.canceled; });
     var planned = plannedAll.filter(function (r) { return !r.done && r.date >= today; }).sort(function (a, b) { return a.date < b.date ? -1 : 1; });
@@ -145,11 +165,14 @@
 
     var started = today >= start;
     var curPlanLeft = started ? Math.max(0, num(S.monthly.life) - thisMonth.life) + Math.max(0, num(S.monthly.personal) - thisMonth.personal) : 0;
-    var base = { pool: pool, reserveNow: reserveNow, today: today, start: start, target: target, plannedByDate: plannedByDate };
+    var base = { pool: pool, reserveNow: reserveNow, today: today, start: start, target: target, plannedByDate: plannedByDate, inflowByDate: inflowByDate };
     var plan = simulate(Object.assign({}, base, { monthly: L, curMonthLeft: curPlanLeft }));
     var pace = paceL == null ? null : simulate(Object.assign({}, base, { monthly: paceL, curMonthLeft: started ? Math.max(0, paceL - thisMonth.living) : 0 }));
 
-    var lifeMonths = L > 0 ? (pool - companyLeft) / L : null;
+    var plannedNoCorp = {};
+    planned.forEach(function (p) { if (p.kind !== 'corp') plannedNoCorp[p.date] = (plannedNoCorp[p.date] || 0) + num(p.amount); });
+    var lifeSim = simulate(Object.assign({}, base, { reserveNow: companyLeft, plannedByDate: plannedNoCorp, monthly: L, curMonthLeft: curPlanLeft }));
+    var lifeMonths = lifeSim.months;
     var corpMonthsList = [];
     for (var j = 0; j <= 2; j++) { var cm = addMonths(ym, -j); var cs = monthOf(cm).corpSpend; if (cs > 0) corpMonthsList.push(cs); }
     var corpAvg = corpMonthsList.length ? sum(corpMonthsList, function (x) { return x; }) / corpMonthsList.length : num(S.companyMonthlyGuess) || null;
@@ -177,7 +200,7 @@
     }
     var daysLeftInMonth = dim(ym) - (+today.slice(8, 10));
     var nextYm = addMonths(ym, 1);
-    var nextNeed = (nextYm >= ymOf(start) && nextYm + '-01' < target ? L : 0) + sum(planned.filter(function (p) { return ymOf(p.date) === nextYm; }), function (p) { return p.amount; });
+    var nextNeed = Math.max(0, (nextYm >= ymOf(start) && nextYm + '-01' < target ? L : 0) - inflowNextMonth(nextYm)) + sum(planned.filter(function (p) { return ymOf(p.date) === nextYm; }), function (p) { return p.amount; });
     if (daysLeftInMonth < S.alert.cashLeadDays && nextNeed > 0 && cash < nextNeed) {
       var gap = nextNeed - cash;
       var eq = [];
@@ -188,6 +211,8 @@
     var hasCard = recs.some(function (r) { return r.type === 'card' && r.month === ym; });
     if (started && !hasCard && +today.slice(8, 10) > num(S.cardDay) + S.alert.cardGraceDays) add('card_' + ym, 'info', '이번 달 카드값이 아직 입력되지 않았어요', '결제일 ' + S.cardDay + '일');
     if (cash < 0) add('cash_negative', 'warn', '현금이 마이너스예요 (' + won(cash) + ')', '매도나 현금 들어옴 기록이 빠졌는지 확인해 주세요');
+    contribMissed.forEach(function (c) { add('contrib_' + c.month + '_' + c.who, 'info', c.who + ' ' + +c.month.slice(5) + '월 공금통장 입금 기록이 없어요', won(c.left) + ' 예정이었어요. 입금했으면 기록 → 공금통장 입금에 적어 주세요'); });
+    contribNow.forEach(function (c) { if (c.left > 0 && today > addDays(c.due, S.alert.cardGraceDays)) add('contrib_' + ym + '_' + c.who, 'info', c.who + ' 이번 달 공금통장 입금이 아직 기록되지 않았어요', c.due + ' 예정 ' + won(c.amount)); });
     if (overdue.length) add('overdue', 'info', '날짜가 지난 예정 출금이 ' + overdue.length + '건 있어요', '실제로 나갔으면 기록하고 완료 처리해 주세요');
     if (!S.confirmed) add('setup', 'info', '시작 숫자를 확인해 주세요', '설정에서 실제 코인 수량, 현금, 법인 잔액을 넣어 주세요');
 
@@ -196,7 +221,7 @@
 
     return {
       today: today, ym: ym, settings: S, prices: px, hold: hold, coinVal: coinVal, coinValue: coinValue, cash: cash, pool: pool, corp: corp, cashed: cashed,
-      used: used, remaining: remaining, need: need, budgetTotal: budgetTotal, coverage: need > 0 ? pool / need : null, surplus: surplus,
+      used: used, remaining: remaining, need: need, budgetTotal: budgetTotal, coverage: need > 0 ? secured / need : null, surplus: surplus, secured: secured, expectedFuture: expectedFuture, expected: expected, contribNow: contribNow,
       thisMonth: thisMonth, jointBalance: jointBalance, depTotal: depTotal, monthly: L, paceL: paceL, paceMonths: paceMonths.length,
       plan: plan, pace: pace, lifeMonths: lifeMonths, corpAvg: corpAvg, corpMonths: corpMonths, companyLeft: companyLeft, reserveNow: reserveNow,
       planned: planned, overdue: overdue, daysToTarget: diffDays(today, target), alerts: alerts, status: status
