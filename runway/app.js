@@ -19,10 +19,13 @@ function nowIso() { return new Date().toISOString(); }
 var enc = new TextEncoder(), dec = new TextDecoder();
 
 // ---------- 기록 읽기/쓰기 (중계 서버) ----------
+async function fetchJson(url, opt) { // Google 쪽 일시 오류(HTML 응답 등)는 null
+  try { var r = await fetch(url, opt); var t = await r.text(); return JSON.parse(t); } catch (e) { return null; }
+}
 async function readLedger() {
-  var r = await fetch(API + '?t=' + Date.now(), { cache: 'no-store' });
-  var j = await r.json();
-  if (!j.ok) throw new Error('불러오기 실패' + (j.status ? ' (HTTP ' + j.status + ')' : ''));
+  var j = null;
+  for (var i = 0; i < 3; i++) { j = await fetchJson(API + '?t=' + Date.now(), { cache: 'no-store' }); if (j && j.ok) break; await sleep(800 * (i + 1)); }
+  if (!j || !j.ok) throw new Error('불러오기 실패' + (j && j.status ? ' (HTTP ' + j.status + ')' : ' (잠시 후 다시 시도해 주세요)'));
   try { localStorage.setItem('runway.cache', JSON.stringify({ data: j.data, sha: j.sha, at: Date.now() })); } catch (e) {}
   return { data: j.data, sha: j.sha };
 }
@@ -31,15 +34,19 @@ async function save(mutate, msg) {
     var cur = await readLedger();
     var next = JSON.parse(JSON.stringify(cur.data));
     mutate(next);
-    next.updatedAt = nowIso();
-    var r = await fetch(API, { method: 'POST', body: JSON.stringify({ content: JSON.stringify(next, null, 1), sha: cur.sha, message: msg + ' (' + ME + ')' }) });
-    var j = await r.json();
-    if (j.ok) { LEDGER = next; SHA = j.sha; try { localStorage.setItem('runway.cache', JSON.stringify({ data: next, sha: j.sha, at: Date.now() })); } catch (e) {} return true; }
+    next.updatedAt = nowIso() + '#' + uid(); // 이번 저장만의 표시 (응답이 애매할 때 실제 저장 여부 확인용)
+    var j = await fetchJson(API, { method: 'POST', body: JSON.stringify({ content: JSON.stringify(next, null, 1), sha: cur.sha, message: msg + ' (' + ME + ')' }) });
+    if (j && j.ok) { LEDGER = next; SHA = j.sha; try { localStorage.setItem('runway.cache', JSON.stringify({ data: next, sha: j.sha, at: Date.now() })); } catch (e) {} return true; }
+    if (!j) { // 응답을 못 받음: 실제로 저장됐는지 확인하고, 안 됐을 때만 다시 시도
+      await sleep(1000);
+      try { var chk = await readLedger(); if (chk.data.updatedAt === next.updatedAt) { LEDGER = chk.data; SHA = chk.sha; return true; } } catch (e) {}
+      continue;
+    }
     if (j.error === 'records cannot shrink') throw new Error('기록은 지울 수 없어요 (취소만 돼요)');
     if (j.status !== 409 && j.status !== 422) throw new Error('저장 실패' + (j.status ? ' (HTTP ' + j.status + ')' : j.error ? ' (' + j.error + ')' : ''));
     await sleep(500 * (i + 1));
   }
-  throw new Error('동시에 저장이 겹쳤어요. 잠시 후 다시 해 주세요.');
+  throw new Error('저장이 잘 안 돼요. 잠시 후 다시 해 주세요.');
 }
 var saving = false;
 async function doSave(mutate, msg, okText) {
@@ -237,8 +244,11 @@ function renderHome() {
       h += '<div class="row"><span class="k">매달 코인에서 채울 돈</span><span class="v">월 ' + won(r.monthlyGap) + '</span></div>';
       h += '<div class="hint" style="margin-top:0">월 ' + man(r.mainMonthly) + ' 쓰는데 정기 입금이 ' + man(r.recurringMonthly) + '이라서, 모자란 만큼 코인을 팔아야 해요. 지금 시세로 ' + sellEq.join(' 또는 ') + ' (계산값일 뿐 매도 권유 아님)</div>';
     }
-    h += '<div class="row"><span class="k">코인 안 팔고 공금통장만으로</span><span class="v ' + (r.jointOnly.exhaust && C.diffDays(r.today, r.jointOnly.exhaust) <= 30 ? 'warnc' : '') + '">' + (r.jointOnly.exhaust ? r.jointOnly.exhaust + '까지' : '5년 이상') + '</span></div>';
-    if (r.expectedFuture > 0) h += '<div class="hint">앞으로 들어올 쮸 입금 ' + won(r.expectedFuture) + '을 넣어서 계산했어요. 공금통장이 바닥나기 전에 코인을 팔아 채우는 걸로 봐요.</div>';
+    h += '<div class="row" style="margin-top:6px;border-top:1px solid var(--line);padding-top:10px"><span class="k">코인 없이 버티는 기간<br><small class="muted">공금통장 + 앞으로 들어올 쮸 입금 ' + man(r.nonCoinTotal) + '</small></span><span class="v">' + (r.nonCoin.exhaust ? r.nonCoin.exhaust + '까지<br><small class="muted">' + C.monthsText(r.nonCoin.months) + '치</small>' : '5년 이상') + '</span></div>';
+    h += '<div class="row"><span class="k">코인을 처음 팔아야 하는 날</span><span class="v ' + (r.jointOnly.exhaust && C.diffDays(r.today, r.jointOnly.exhaust) <= 30 ? 'warnc' : '') + '">' + (r.jointOnly.exhaust || '없음') + '</span></div>';
+    if (r.jointOnly.exhaust && r.nonCoin.exhaust && r.jointOnly.exhaust < r.nonCoin.exhaust && r.recurringMonthly > 0) h += '<div class="hint" style="margin-top:0">쮸 입금은 한꺼번에가 아니라 매달 ' + man(r.recurringMonthly) + '씩 들어와요. 월 ' + man(r.mainMonthly) + '을 쓰면 매달 ' + man(r.monthlyGap) + '씩 모자라서, 이날쯤부터 코인을 팔아 채워야 해요.</div>';
+    h += '<div class="row"><span class="k">목표일까지 코인에서 나와야 하는 돈</span><span class="v">' + won(r.coinNeedToTarget) + (r.coinValue > 0 ? '<br><small class="muted">지금 코인의 ' + Math.round(r.coinNeedToTarget / r.coinValue * 100) + '%</small>' : '') + '</span></div>';
+    h += '<div class="hint">맨 위 런웨이는 코인까지 합쳐서, 공금통장이 비면 코인을 팔아 채운다고 보고 계산해요.</div>';
   }
   h += '</div>';
 

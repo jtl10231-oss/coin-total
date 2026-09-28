@@ -195,6 +195,14 @@
     var mainMonthly = burnReady ? Math.max(0, burnMonthly) : planMonthly;
     var main = pace || plan;
     var jointOnly = simulate(Object.assign({}, base, { pool: balance + cash, monthly: mainMonthly }));
+    // 코인 없이 버티는 기간 (돈 총량 기준): 공금통장 + 현금 + 앞으로 들어올 정기 입금을 한꺼번에 있다고 보고 계산
+    var nonCoinTotal = balance + cash + expectedFuture;
+    var nonCoin = simulate(Object.assign({}, base, { pool: nonCoinTotal, inflowByDate: {}, monthly: mainMonthly }));
+    // 목표일까지 필요한 돈 중 코인에서 나와야 하는 금액 (오늘~목표일 전날 소비 + 예정 출금 - 코인 아닌 돈)
+    var spendToTarget = 0;
+    for (var dx = today; dx < target; dx = addDays(dx, 1)) spendToTarget += mainMonthly / dim(ymOf(dx));
+    spendToTarget += sum(planned.filter(function (p) { return p.date < target; }), function (p) { return p.amount; });
+    var coinNeedToTarget = Math.max(0, spendToTarget - nonCoinTotal);
     var recurringMonthly = sum((S.recurring || []).filter(function (c) { var nm = addMonths(ym, 1); return c && c.from <= nm && c.to >= nm; }), function (c) { return c.amount; });
     var monthlyGap = Math.max(0, mainMonthly - recurringMonthly);
 
@@ -246,6 +254,7 @@
       burnDaily: burnDaily, burnMonthly: burnMonthly, burnDays: burnDays, burnReady: burnReady, spentThisMonth: spentThisMonth,
       expected: expected, expectedFuture: expectedFuture, autoDeps: autoDeps, skipped: skipped,
       assetsNow: assetsNow, pool: assetsNow, secured: secured, used: used, remaining: remaining, need: need, budgetTotal: budgetTotal, coverage: need > 0 ? secured / need : null, surplus: surplus,
+      nonCoinTotal: nonCoinTotal, nonCoin: nonCoin, spendToTarget: spendToTarget, coinNeedToTarget: coinNeedToTarget,
       planMonthly: planMonthly, mainMonthly: mainMonthly, monthsInPeriod: monthsInPeriod, recurringMonthly: recurringMonthly, monthlyGap: monthlyGap, plan: plan, pace: pace, main: main, jointOnly: jointOnly, planned: planned, overdue: overdue,
       saved: saved, savedFrom: savedFrom, savedDays: savedDays, planToDate: planToDate, spentToDate: spentToDate, projectedSave: projectedSave,
       daysToTarget: diffDays(today, target), alerts: alerts, status: status
