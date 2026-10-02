@@ -1,186 +1,22 @@
 <!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="코인 총액">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="theme-color" content="#1f4bd8">
-<title>코인원 기준 보유 코인 총액</title>
-<style>
-body{padding-top:max(24px,env(safe-area-inset-top))!important;font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;background:#f4f6fa;margin:0;padding:24px;color:#1a1f36}
-.wrap{max-width:560px;margin:auto}
-h1{font-size:20px;margin:0 0 4px}.sub{color:#6b7280;font-size:13px;margin-bottom:16px}
-.card{background:#fff;border-radius:14px;padding:18px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
-.total{background:#1f4bd8;color:#fff}.total .label{opacity:.85;font-size:14px}.total .v{font-size:32px;font-weight:700;margin-top:6px}
-.pl{margin-top:10px;font-size:15px;display:flex;justify-content:space-between;border-top:1px solid rgba(255,255,255,.25);padding-top:10px}
-.pl b{font-size:18px}
-.row{display:flex;justify-content:space-between;align-items:center;gap:8px}
-.name{font-weight:700;font-size:16px}.muted{color:#6b7280;font-size:13px;margin-top:4px}
-.val{font-weight:700;font-size:18px;text-align:right}
-.up{color:#e11d48}.down{color:#2563eb}
-.err{color:#e11d48;font-size:13px;margin-top:8px}
-.chart-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
-.tabs button{border:0;background:#eef1f7;color:#374151;padding:6px 10px;border-radius:8px;font-size:13px;margin-left:4px;cursor:pointer}
-.tabs button.on{background:#1f4bd8;color:#fff}
-#chart{width:100%;height:220px;display:block;touch-action:none}
-.tip{font-size:13px;color:#374151;min-height:18px;margin-top:6px}
-.sec-title{font-weight:700;font-size:16px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:baseline}
-.senti{padding:10px 0;border-top:1px solid #f0f2f6}.senti:first-of-type{border-top:0;padding-top:0}
-.senti .top{display:flex;justify-content:space-between;align-items:baseline}
-.bar{height:8px;border-radius:4px;background:linear-gradient(90deg,#2563eb,#9ca3af 50%,#e11d48);position:relative;margin:8px 0 6px}
-.bar i{position:absolute;top:-4px;width:4px;height:16px;border-radius:2px;background:#111827;transform:translateX(-2px)}
-.parts{font-size:12px;color:#6b7280;line-height:1.6}
-table.fc{width:100%;border-collapse:collapse;font-size:13px}
-table.fc th{color:#6b7280;font-weight:600;text-align:right;padding:6px 4px;border-bottom:1px solid #eef1f7}
-table.fc th:first-child,table.fc td:first-child{text-align:left}
-table.fc td{text-align:right;padding:8px 4px;border-bottom:1px solid #f4f6fa;vertical-align:top}
-table.fc td b{font-size:14px}
-table.fc tr.grp td{font-weight:700;color:#1a1f36;background:#f7f8fb;padding:6px 6px;font-size:13px}.rng{display:block;font-size:11px;color:#9ca3af;margin-top:2px}
-.news h4{margin:12px 0 6px;font-size:14px}.news h4:first-child{margin-top:0}
-.news a{display:block;color:#1a1f36;text-decoration:none;font-size:14px;line-height:1.45;padding:6px 0;border-top:1px solid #f4f6fa}
-.news a span{display:block;font-size:11px;color:#9ca3af;margin-top:2px}
-.note{font-size:11px;color:#9ca3af;line-height:1.6;margin:4px 2px 14px}
-.topnav{display:flex;gap:6px;margin-bottom:14px}
-.topnav a{flex:1;text-align:center;padding:8px;border-radius:10px;text-decoration:none;color:#6b7280;background:#e7ebf0;font-weight:600;font-size:14px}
-.topnav a.on{background:#1f4bd8;color:#fff}
-</style></head><body><div class="wrap">
-<nav class="topnav"><a class="on" href="./">코인</a><a href="runway/">런웨이</a></nav>
-<h1>코인원 기준 보유 코인 총액</h1>
-<div class="sub">코인원 원화 마켓 현재가 · 실시간 갱신 · <span id="time">연결 중...</span></div>
-<div class="card total"><div class="label">총 평가금액</div><div class="v" id="total">불러오는 중...</div>
-<div class="pl"><span>수익률</span><span><b id="rate2">-</b> <span id="profit2"></span></span></div></div>
-<div class="card"><div class="chart-head"><div class="name">평가금액 변화 <span class="muted">1분 단위</span></div>
-<div class="tabs"><button data-m="60">1시간</button><button data-m="360" class="on">6시간</button><button data-m="1440">24시간</button><button data-m="10080">7일</button></div></div>
-<canvas id="chart"></canvas><div class="tip" id="tip">기록 불러오는 중...</div></div>
-<div id="list"></div>
-<div class="card"><div class="sec-title">센티멘트 <span class="muted" id="fcTime"></span></div><div id="senti">불러오는 중...</div></div>
-<div class="card"><div class="sec-title">가격 예측 <span class="muted">긍정 · 중간 · 나쁨</span></div><div id="fc">불러오는 중...</div></div>
-<div class="card news"><div class="sec-title">주요 뉴스 <span class="muted" id="newsTime"></span></div><div id="news">불러오는 중...</div></div>
-<div class="note">센티멘트는 공포·탐욕 지수, 7일 추세, RSI, CoinGecko 투표, 시가총액 변화를 0~100점으로 합친 값이에요. 뉴스는 5분마다 구글 뉴스(한국어, 주요 영어 매체)에서 ETF·해킹·규제·상장·업그레이드 같은 핵심 주제 기사만 골라요. 예측은 최근 90일 코인원 일별 변동폭을 기준으로 한 통계 추정이에요. 중간은 센티멘트(코인 60% + 시장 40%)로 조금 기울인 값이고, 긍정·나쁨은 그보다 표준편차 1만큼 오르거나 내린 경우예요(이 사이에 들어올 확률을 약 68%로 가정). 총액은 두 코인이 같은 시나리오로 움직인다고 보고 계산했어요. 투자 조언이 아니에요. 1시간마다 갱신돼요.</div>
-<div class="err" id="err"></div>
-</div>
-<script>
-const coins=[{sym:'SOL',name:'솔라나',qty:126.96,buy:165000},{sym:'WLD',name:'월드코인',qty:12379.62,buy:730}];
-const won=n=>Math.round(n).toLocaleString('ko-KR')+'원';
-const sign=n=>(n>=0?'+':'-');
-document.getElementById('list').innerHTML=coins.map(c=>`<div class="card"><div class="row"><div>
-<div class="name">${c.name} <span class="muted">${c.sym}</span></div>
-<div class="muted">보유 ${c.qty.toLocaleString('ko-KR')}개 · 매수가 ${c.buy.toLocaleString('ko-KR')}원</div>
-<div class="muted">현재가 <b id="p-${c.sym}">-</b> <span id="r-${c.sym}"></span></div></div>
-<div class="val"><div id="v-${c.sym}">-</div><div id="g-${c.sym}" style="font-size:13px;margin-top:4px">-</div></div></div></div>`).join('');
-function render(){
-  if(coins.some(c=>c.price==null))return;
-  let sum=0;
-  coins.forEach(c=>{const v=c.price*c.qty;sum+=v;
-    document.getElementById('p-'+c.sym).textContent=c.price.toLocaleString('ko-KR')+'원';
-    const r=document.getElementById('r-'+c.sym);r.textContent=sign(c.rate)+Math.abs(c.rate).toFixed(2)+'%';r.className=c.rate>=0?'up':'down';
-    document.getElementById('v-'+c.sym).textContent=won(v);
-    const cost=c.buy*c.qty,gp=v-cost,gr=gp/cost*100,g=document.getElementById('g-'+c.sym);
-    g.textContent=sign(gr)+Math.abs(gr).toFixed(2)+'% ('+sign(gp)+won(Math.abs(gp))+')';g.className=gr>=0?'up':'down';});
-  const tc=coins.reduce((a,c)=>a+c.buy*c.qty,0),p2=sum-tc,pr2=p2/tc*100;
-  document.getElementById('rate2').textContent=sign(pr2)+Math.abs(pr2).toFixed(2)+'%';
-  document.getElementById('profit2').textContent='('+sign(p2)+won(Math.abs(p2))+')';
-  document.getElementById('total').textContent=won(sum);
-  document.title=won(sum)+' ('+sign(pr2)+Math.abs(pr2).toFixed(2)+'%)';
-}
-let ws,pingTimer;
-function connect(){
-  ws=new WebSocket('wss://stream.coinone.co.kr');
-  ws.onopen=()=>{document.getElementById('err').textContent='';
-    coins.forEach(c=>ws.send(JSON.stringify({request_type:'SUBSCRIBE',channel:'TICKER',topic:{quote_currency:'KRW',target_currency:c.sym}})));
-    clearInterval(pingTimer);pingTimer=setInterval(()=>ws.readyState===1&&ws.send(JSON.stringify({request_type:'PING'})),60000);};
-  ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.response_type!=='DATA')return;const d=m.data;
-    const c=coins.find(x=>x.sym===d.target_currency);if(!c)return;c.price=+d.last;c.rate=(d.last-d.first)/d.first*100;
-    document.getElementById('time').textContent=new Date(+d.timestamp).toLocaleTimeString('ko-KR')+' 기준';render();addLive();};
-  ws.onclose=()=>{document.getElementById('err').textContent='연결이 끊겨 다시 연결 중...';setTimeout(connect,3000)};
-}
-
-// ---- 차트 ----
-const STEP=60000;let series=new Map(),range=360,hover=null;
-const totalOf=(s,w)=>s*coins[0].qty+w*coins[1].qty;
-const COST=coins.reduce((a,c)=>a+c.buy*c.qty,0);
-async function loadHistory(){
-  try{const h=await (await fetch('https://raw.githubusercontent.com/jtl10231-oss/coin-total/data/history.json?t='+Date.now())).json();
-    const cur=Math.floor(Date.now()/STEP)*STEP;h.SOL.forEach((v,i)=>{const t=h.t0+i*h.step;if(t<cur)series.set(t,totalOf(v,h.WLD[i]))});drawChart();
-  }catch(e){document.getElementById('tip').textContent='지난 기록을 불러오지 못했어요. 지금부터 쌓이는 값만 보여요.'}
-}
-const LS='liveTotals_'+coins.map(c=>c.qty).join('_');
-try{const o=JSON.parse(localStorage.getItem(LS)||'{}');const cut=Date.now()-7*1440*STEP;Object.entries(o).forEach(([t,v])=>{if(+t>=cut)series.set(+t,v)})}catch(e){}
-let lastSave=0;
-function addLive(){if(coins.some(c=>c.price==null))return;const t=Math.floor(Date.now()/STEP)*STEP;series.set(t,totalOf(coins[0].price,coins[1].price));
-  if(Date.now()-lastSave>15000){lastSave=Date.now();try{const cut=Date.now()-1440*STEP,o={};series.forEach((v,k)=>{if(k>=cut)o[k]=v});localStorage.setItem(LS,JSON.stringify(o))}catch(e){}}
-  drawChart();}
-const man=v=>(v/10000).toLocaleString('ko-KR',{maximumFractionDigits:0})+'만';
-const hm=t=>{const d=new Date(t);return (range>1440?(d.getMonth()+1)+'/'+d.getDate()+' ':'')+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')};
-function pts(){const now=Date.now(),from=now-range*STEP;return [...series.entries()].filter(([t])=>t>=from).sort((a,b)=>a[0]-b[0]);}
-function drawChart(){
-  const cv=document.getElementById('chart'),dpr=window.devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight;
-  cv.width=W*dpr;cv.height=H*dpr;const g=cv.getContext('2d');g.scale(dpr,dpr);g.clearRect(0,0,W,H);
-  const p=pts();if(p.length<2){return}
-  const L=6,R=W-52,T=8,B=H-22;
-  let lo=Math.min(...p.map(x=>x[1])),hi=Math.max(...p.map(x=>x[1]));
-  if(COST>lo-(hi-lo)*0.3&&COST<hi+(hi-lo)*0.3){lo=Math.min(lo,COST);hi=Math.max(hi,COST)}
-  const pad=(hi-lo)*0.08||hi*0.001;lo-=pad;hi+=pad;
-  const t0=p[0][0],t1=p[p.length-1][0];
-  const X=t=>L+(R-L)*(t-t0)/Math.max(1,t1-t0),Y=v=>B-(B-T)*(v-lo)/(hi-lo);
-  g.font='11px -apple-system,sans-serif';g.fillStyle='#9ca3af';g.strokeStyle='#eef1f7';g.lineWidth=1;
-  for(let i=0;i<=3;i++){const v=lo+(hi-lo)*i/3,y=Y(v);g.beginPath();g.moveTo(L,y);g.lineTo(R,y);g.stroke();g.fillText(man(v),R+4,y+4);}
-  g.fillText(hm(t0),L,H-6);const e=hm(t1);g.fillText(e,R-g.measureText(e).width,H-6);
-  if(COST>lo&&COST<hi){g.setLineDash([4,4]);g.strokeStyle='#9ca3af';g.beginPath();g.moveTo(L,Y(COST));g.lineTo(R,Y(COST));g.stroke();g.setLineDash([]);g.fillStyle='#6b7280';g.fillText('본전',L+2,Y(COST)-4);}
-  const last=p[p.length-1][1],col=last>=COST?'#e11d48':'#2563eb';
-  g.strokeStyle=col;g.lineWidth=1.8;g.beginPath();p.forEach(([t,v],i)=>i?g.lineTo(X(t),Y(v)):g.moveTo(X(t),Y(v)));g.stroke();
-  let sel=p[p.length-1];
-  if(hover!=null){const tt=t0+(t1-t0)*Math.min(1,Math.max(0,(hover-L)/(R-L)));sel=p.reduce((a,b)=>Math.abs(b[0]-tt)<Math.abs(a[0]-tt)?b:a);
-    g.strokeStyle='#d1d5db';g.lineWidth=1;g.beginPath();g.moveTo(X(sel[0]),T);g.lineTo(X(sel[0]),B);g.stroke();}
-  g.fillStyle=col;g.beginPath();g.arc(X(sel[0]),Y(sel[1]),3.5,0,7);g.fill();
-  const r=(sel[1]-COST)/COST*100,d=new Date(sel[0]);
-  document.getElementById('tip').innerHTML=`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')} · <b>${won(sel[1])}</b> <span class="${r>=0?'up':'down'}">${sign(r)}${Math.abs(r).toFixed(2)}%</span>`;
-}
-const cvs=document.getElementById('chart');
-const mv=e=>{const b=cvs.getBoundingClientRect();hover=(e.touches?e.touches[0].clientX:e.clientX)-b.left;drawChart();};
-cvs.addEventListener('mousemove',mv);cvs.addEventListener('touchmove',mv,{passive:true});cvs.addEventListener('touchstart',mv,{passive:true});
-['mouseleave','touchend'].forEach(ev=>cvs.addEventListener(ev,()=>{hover=null;drawChart()}));
-document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));b.classList.add('on');range=+b.dataset.m;drawChart();});
-window.addEventListener('resize',drawChart);
-loadHistory();setInterval(loadHistory,5*60000);
-
-
-// ---- 센티멘트 · 예측 · 뉴스 ----
-const r100=v=>Math.round(v/100)*100, r1=v=>Math.round(v), r1000=v=>Math.round(v/1000)*1000;
-const fmtW=v=>v.toLocaleString('ko-KR')+'원';
-const ago=t=>{const m=Math.round((Date.now()-t)/60000);return m<1?'방금':m<60?m+'분 전':m<1440?Math.round(m/60)+'시간 전':Math.round(m/1440)+'일 전'};
-const esc=x=>String(x).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-function sentiRow(name,o){const sc=o.score,cl=sc>=60?'up':sc<40?'down':'';
-  return `<div class="senti"><div class="top"><span class="name">${name}</span><span><b class="${cl}" style="font-size:18px">${sc}</b><span class="muted"> / 100 · ${o.label}</span></span></div>
-  <div class="bar"><i style="left:${sc}%"></i></div><div class="parts">${o.parts.map(p=>`${p.name} ${esc(p.raw)}`).join(' · ')}</div></div>`}
-async function loadForecast(){
-  try{
-    const f=await (await fetch('https://raw.githubusercontent.com/jtl10231-oss/coin-total/data/forecast.json?t='+Date.now())).json();
-    const d=new Date(f.updated);document.getElementById('fcTime').textContent=`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')} 계산`;
-    document.getElementById('senti').innerHTML=sentiRow('코인 시장 전반',f.market)+sentiRow('솔라나',f.SOL.sentiment)+sentiRow('월드코인',f.WLD.sentiment);
-    const lab={1:'1일 후',3:'3일 후',7:'7일 후',14:'2주 후'};
-    const rate=v=>`<span class="${v>=0?'up':'down'}">${sign(v)}${Math.abs(v).toFixed(1)}%</span>`;
-    const Q={SOL:coins[0].qty,WLD:coins[1].qty};
-    const sc=[['긍정','high','up'],['중간','mid',''],['나쁨','low','down']];
-    document.getElementById('fc').innerHTML=`<table class="fc"><tr><th>시나리오</th><th>솔라나</th><th>월드코인</th><th>총액 (수익률)</th></tr>`+
-      f.forecast.map(x=>`<tr class="grp"><td colspan="4">${lab[x.days]}</td></tr>`+sc.map(([nm,k,cl])=>{
-        const sp=r100(x.SOL[k]),wp=r1(x.WLD[k]),tot=r1000(sp*Q.SOL+wp*Q.WLD),rt=(tot-COST)/COST*100;
-        return `<tr><td><span class="${cl}">${nm}</span></td><td>${fmtW(sp)}</td><td>${fmtW(wp)}</td><td><b>${fmtW(tot)}</b> ${rate(rt)}</td></tr>`}).join('')).join('')+`</table>`;
-  }catch(e){['senti','fc'].forEach(id=>document.getElementById(id).textContent='아직 계산된 데이터가 없어요. 잠시 후 다시 확인해 주세요.')}
-}
-loadForecast();setInterval(loadForecast,10*60000);
-async function loadNews(){
-  try{
-    const f=await (await fetch('https://raw.githubusercontent.com/jtl10231-oss/coin-total/data/news.json?t='+Date.now())).json();
-    const item=n=>`<a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}<span>${esc(n.source)} · ${ago(n.date)}</span></a>`;
-    const block=(arr,lat)=>arr.length?arr.map(item).join(''):`<div class="muted" style="padding:6px 0">최근 48시간 동안 중요 뉴스가 없어요.</div>`+(lat?`<div style="opacity:.55">${item(lat)}</div>`:'');
-    document.getElementById('news').innerHTML=`<h4>솔라나</h4>${block(f.SOL||[],f.SOL_latest)}<h4>월드코인</h4>${block(f.WLD||[],f.WLD_latest)}`;
-    document.getElementById('newsTime').textContent=ago(f.updated)+' 확인';
-  }catch(e){document.getElementById('news').textContent='뉴스를 불러오지 못했어요.'}
-}
-loadNews();setInterval(loadNews,3*60000);
-if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
-connect();
-</script></body></html>
+<html lang="ko"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f5f3ec"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="택 앤 쭈 코인"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="택 앤 쭈의 코인원 원화 시세와 보유 코인 기록.">
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" type="image/svg+xml" href="icons/mark.svg"><link rel="apple-touch-icon" href="icons/apple-180.png"><link rel="stylesheet" href="portfolio.css"><title>택 앤 쭈 코인</title></head>
+<body><a class="skip" href="#overview">본문으로 이동</a><div class="shell">
+<header class="masthead"><a class="brand" href="./" aria-label="택 앤 쭈 코인 홈"><img src="icons/mark.svg" alt="" width="38" height="38"><span>택 앤 쭈<span class="brand-sub">COIN JOURNAL</span></span></a><nav class="topnav" aria-label="앱 선택"><a href="./" aria-current="page">코인</a><a href="runway/">런웨이 <span aria-hidden="true">↗</span></a></nav></header>
+<main><section id="overview" class="overview" aria-labelledby="overview-title">
+<div class="section-kicker"><h1 id="overview-title">우리의 코인, 한눈에.</h1><span class="edition">SOL / WLD</span></div>
+<div class="hero-layout"><div class="hero"><div class="eyebrow">현재 평가액 <span class="unit-tag">KRW</span></div><div class="hero-value"><span id="total">—</span><span class="currency">원</span></div><div class="hero-profit"><span>원금 대비 손익</span><strong id="profit">—</strong><span id="return" class="return-pill">—</span></div><div class="status-line"><span id="status-dot" class="status-dot"></span><span id="price-status" role="status">시세 연결 중</span><button type="button" id="retry" class="text-button">다시 확인 <span aria-hidden="true">↻</span></button></div><p class="source-line" id="quote-time">코인원 원화 마켓 · 최근 체결가</p><div class="asset-pulse" aria-label="코인별 현재 상태"><a href="#asset-SOL" data-asset-jump="SOL"><img src="icons/sol.svg" alt="" width="28" height="28"><span><b>SOL</b><strong id="pulse-SOL">시세 대기</strong><small id="pulse-rate-SOL">24시간 기록 대기</small></span><i aria-hidden="true">↗</i></a><a href="#asset-WLD" data-asset-jump="WLD"><img src="icons/wld.svg" alt="" width="28" height="28"><span><b>WLD</b><strong id="pulse-WLD">시세 대기</strong><small id="pulse-rate-WLD">24시간 기록 대기</small></span><i aria-hidden="true">↗</i></a></div></div>
+<aside class="hero-aside" aria-label="평가 기준과 보유 비중"><div class="aside-label">보유 자산 비중</div><div id="allocation" class="allocation"><span class="allocation-empty">시세를 기다리고 있어요</span></div><div class="allocation-labels" id="allocation-labels"><span>솔라나</span><span>월드코인</span></div><details class="basis"><summary>손익과 평가 기준 <span aria-hidden="true">+</span></summary><div class="basis-content"><p>손익은 기존 매입 원가 대비로 계산해요. 원금 금액은 기존 표시 설정에 따라 숨겨져 있어요.</p><p>보유 수량 × 코인원 원화 최근 체결가로 계산해요. 환율 환산은 없으며 수수료·세금은 제외했어요.</p><p>보유 수량과 매입가는 기존 설정을 사용해요. 런웨이 기록·알림과 수량이 다를 수 있어요.</p></div></details></aside></div>
+<div id="price-warning" class="notice" role="status" hidden></div>
+<section class="chart-section" aria-labelledby="chart-title"><div class="chart-heading"><div><h2 id="chart-title">흐름을 읽다</h2><p>현재 보유 수량으로 환산한 1분 기록</p></div><div class="periods" role="group" aria-label="차트 기간"><button type="button" data-range="60" aria-pressed="false">1시간</button><button type="button" data-range="360" aria-pressed="true">6시간</button><button type="button" data-range="1440" aria-pressed="false">24시간</button><button type="button" data-range="10080" aria-pressed="false">7일</button></div></div>
+<div class="chart-meta"><div><span class="meta-label" id="period-label">6시간 기록 변화</span><strong id="period-change">—</strong><span id="period-rate">—</span></div><div class="chart-switch" role="group" aria-label="차트 표시"><button type="button" data-chart="total" aria-pressed="true">평가액</button><button type="button" data-chart="compare" aria-pressed="false">코인 비교</button></div></div>
+<div class="chart-wrap"><canvas id="chart" role="img" aria-label="평가액 변화 차트" aria-describedby="chart-summary"></canvas><div class="chart-empty" id="chart-empty">1분 기록을 불러오고 있어요</div></div><div class="chart-foot"><span id="chart-tip">기록을 기다리는 중</span><span class="chart-legend" id="chart-legend"><i></i> 평가액</span></div><label class="scrub-label" for="chart-scrub">차트 시점 살펴보기</label><input id="chart-scrub" class="chart-scrub" type="range" min="0" max="0" value="0" aria-label="차트 시점 살펴보기" disabled><p id="chart-summary" class="sr-only"></p><div class="chart-caption"><span id="history-status">기록 확인 중</span><span>시간은 한국시간(KST)</span></div></section></section>
+<section id="assets" class="assets-section" aria-labelledby="assets-title"><div class="section-head"><div><span class="eyebrow">PORTFOLIO</span><h2 id="assets-title">우리가 담은 자산</h2></div><span class="section-note">2개의 코인</span></div><div class="asset-table-head" aria-hidden="true"><span>자산 / 현재가</span><span>평가액 / 원금 대비</span></div><div id="asset-list"></div><div class="contribution"><h3>선택 기간의 변화 기여</h3><p>각 코인의 가격 변화가 평가액에 더한 금액이에요.</p><div id="contributions">기록을 기다리는 중</div></div></section>
+<section id="context" class="context-section" aria-labelledby="context-title"><div class="section-head"><div><span class="eyebrow">MARKET NOTES</span><h2 id="context-title">시장을 이해하는 단서</h2></div></div><div class="context-grid"><section class="sentiment-section" aria-labelledby="sentiment-title"><div class="subhead"><h3 id="sentiment-title">시장 온도</h3><span id="forecast-status" class="section-note">계산 자료 확인 중</span></div><div id="sentiment"><p class="empty-copy">센티멘트를 불러오고 있어요.</p></div></section><section class="news-section" aria-labelledby="news-title"><div class="subhead"><h3 id="news-title">읽어둘 뉴스</h3><span id="news-status" class="section-note">확인 중</span></div><div id="news"><p class="empty-copy">뉴스를 불러오고 있어요.</p></div></section></div>
+<details class="scenario-section"><summary><div><span class="eyebrow">SCENARIOS</span><h3>가격 시나리오 살펴보기</h3><p>최근 변동폭으로 계산한 가정이에요.</p></div><span class="expand-icon" aria-hidden="true">+</span></summary><div class="scenario-content"><div class="scenario-periods" role="group" aria-label="시나리오 기간"><button type="button" data-days="1" aria-pressed="true">1일</button><button type="button" data-days="3" aria-pressed="false">3일</button><button type="button" data-days="7" aria-pressed="false">7일</button><button type="button" data-days="14" aria-pressed="false">2주</button></div><div id="scenarios"><p class="empty-copy">계산 자료를 기다리는 중</p></div><p class="method-note">최근 90일 일별 변동폭과 센티멘트로 계산한 통계적 시나리오이며 미래 가격을 보장하지 않아요. 상단·중간·하단은 중간에서 표준편차 1만큼 움직이는 가정이에요. 두 코인이 같은 방향으로 움직인다고 보고, 반올림 전 가격에 현재 설정 수량을 곱해요.</p></div></details>
+<details class="methodology"><summary>자료와 계산 방법 <span aria-hidden="true">+</span></summary><div><p>시장 온도는 공포·탐욕 지수, 7일 추세, RSI, CoinGecko 투표와 전체 시가총액 변화 등을 합친 0~100점 지표예요. 투자 판단을 대신하지 않아요.</p><p>시세는 코인원 WebSocket, 차트는 기존 GitHub 1분 수집 자료를 사용해요. 수집 과정에서 없는 분은 앞선 가격으로 채워질 수 있고, 파일 캐시 때문에 최신 기록이 지연될 수 있어요. 24시간 등락은 해당 시점의 1분 기록이 있을 때만 표시해요. 자산 상세의 UTC 시가 대비 값은 한국시간 오전 9시를 기준으로 해요.</p><p>뉴스는 기존 Google News 수집에서 주요 주제 기사만 선별해요. 계산 자료는 약 1시간, 뉴스는 약 5분 주기로 생성돼요. 화면은 기록 5분·계산 10분·뉴스 3분마다 다시 확인해요.</p></div></details></section></main>
+<footer><span>택 앤 쭈 코인</span><span>가격을 기록하고, 변화를 이해해요.</span><small>수수료·세금 제외 · 투자 조언이 아니에요</small><small id="version">JOURNAL 2026.10.02</small></footer></div>
+<nav class="bottomnav" aria-label="화면 빠른 이동"><a href="#overview" aria-current="location"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V9m8 9V4m8 14v-6"/></svg><span>한눈에</span></a><a href="#assets"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v13H4zM7 7V4h10v3M4 12h16"/></svg><span>보유 자산</span></a><a href="#context"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v15H4zM8 9h8m-8 4h8m-8 3h4"/></svg><span>시장 노트</span></a></nav>
+<script>const coins=[{sym:'SOL',name:'솔라나',qty:126.96,buy:165000},{sym:'WLD',name:'월드코인',qty:12379.62,buy:730}];</script><script src="portfolio-core.js"></script><script src="portfolio.js"></script></body></html>
