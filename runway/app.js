@@ -1,10 +1,11 @@
-/* 쮸앤택 Runway 화면 동작 */
+/* 택 앤 쭈 런웨이 화면 동작 (2026.10 재디자인: 화면만 새로, 계산은 core.js 그대로) */
 (function () {
 'use strict';
 var API = 'https://script.google.com/macros/s/AKfycbxVJypN_d3BeLrL3-y1Z453t95wdB3xRlRg72umD_-phS1Beq1sVVFB4Ay-sbSYR_6Wmg/exec'; // 구글 Apps Script 중계 서버 (열쇠는 서버에만 있음)
 var C = window.RunwayCore;
 var ME = null, LEDGER = null, SHA = null, PRICES = { SOL: null, WLD: null }, PRICE_AT = null;
-var TAB = 'home', RECTYPE = 'sale', rendering = false, histLimit = 30;
+var TAB = 'home', RECTYPE = 'jbal', rendering = false, histLimit = 30;
+var SYNC_AT = null, SYNC_FAIL = false, CACHE_AT = null; // 자료 기준 표시용: 마지막 서버 동기화 시각 / 실패 여부 / 저장본 시각
 var $ = function (s) { return document.querySelector(s); };
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 var won = C.won;
@@ -25,8 +26,10 @@ async function fetchJson(url, opt) { // Google 쪽 일시 오류(HTML 응답 등
 async function readLedger() {
   var j = null;
   for (var i = 0; i < 3; i++) { j = await fetchJson(API + '?t=' + Date.now(), { cache: 'no-store' }); if (j && j.ok) break; await sleep(800 * (i + 1)); }
+  if (!j || !j.ok) { SYNC_FAIL = true; if (TAB === 'home') queueHome(); }
   if (!j || !j.ok) throw new Error('불러오기 실패' + (j && j.status ? ' (HTTP ' + j.status + ')' : ' (잠시 후 다시 시도해 주세요)'));
   try { localStorage.setItem('runway.cache', JSON.stringify({ data: j.data, sha: j.sha, at: Date.now() })); } catch (e) {}
+  SYNC_AT = Date.now(); SYNC_FAIL = false;
   return { data: j.data, sha: j.sha };
 }
 async function save(mutate, msg) {
@@ -84,7 +87,7 @@ var homeQueued = false, lastHome = 0;
 function queueHome() {
   if (homeQueued || TAB !== 'home' || !LEDGER) return;
   homeQueued = true;
-  setTimeout(function () { homeQueued = false; renderHome(); }, Math.max(0, 1500 - (Date.now() - lastHome)));
+  setTimeout(function () { homeQueued = false; if (Date.now() - lastTouch < 5000) return queueHome(); renderHome(); }, Math.max(0, 1500 - (Date.now() - lastHome), 5000 - (Date.now() - lastTouch)));
 }
 
 // ---------- 열기: 로그인 없이 바로 쮸/택 선택 (한 번 고르면 이 기기에 저장) ----------
@@ -107,11 +110,11 @@ function boot() {
 async function start() {
   $('#lock').hidden = true; $('#app').hidden = false;
   var cached = null; try { cached = JSON.parse(localStorage.getItem('runway.cache') || 'null'); } catch (e) {}
-  if (cached && cached.data) { LEDGER = cached.data; SHA = cached.sha; renderAll(); }
-  else $('#tab-home').innerHTML = '<div class="card sub">불러오는 중...</div>';
+  if (cached && cached.data) { LEDGER = cached.data; SHA = cached.sha; CACHE_AT = cached.at; renderAll(); }
+  else $('#tab-home').innerHTML = '<div class="state" role="status"><div class="skel l"></div><div class="skel m"></div><div class="skel s"></div><p>기록을 불러오는 중이에요</p></div>';
   if (!wsStarted) { wsStarted = true; connectWS(); seedPrices(); }
   try { var f = await readLedger(); LEDGER = f.data; SHA = f.sha; renderAll(); }
-  catch (e) { if (!LEDGER) $('#tab-home').innerHTML = '<div class="card">불러오지 못했어요: ' + esc(e.message) + ' <button class="mini" onclick="location.reload()">다시</button></div>'; else toast('최신 기록을 못 불러왔어요. 잠시 후 다시 시도해요'); }
+  catch (e) { if (!LEDGER) $('#tab-home').innerHTML = '<div class="state" role="alert"><h3>기록을 불러오지 못했어요</h3><p>' + esc(e.message) + '</p><p>저장된 기록은 그대로 안전해요.</p><button class="btn" onclick="location.reload()">다시 시도</button></div>'; else { toast('최신 기록을 못 불러왔어요. 저장된 기록을 보여드려요'); renderAll(); } }
   setInterval(async function () { // 다른 사람이 입력한 기록 반영 (2분마다)
     if (document.hidden) return;
     try { var f = await readLedger(); if (f && f.sha !== SHA) { LEDGER = f.data; SHA = f.sha; if (TAB === 'home') renderHome(); else if (!document.activeElement || !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) renderAll(); } } catch (e) {}
@@ -125,141 +128,301 @@ document.querySelectorAll('.bottom button').forEach(function (b) {
     renderAll(); window.scrollTo(0, 0);
   };
 });
-function renderAll() { if (!LEDGER) return; if (TAB === 'home') renderHome(); if (TAB === 'rec') renderRec(); if (TAB === 'memo') renderMemo(); if (TAB === 'set') renderSet(); }
+function gotoTab(t) { var b = document.querySelector('.bottom button[data-tab="' + t + '"]'); if (b) b.click(); }
+function renderAll() { if (!LEDGER) return; var mc = $('#me-chip'); if (mc) mc.textContent = ME || '-'; if (TAB === 'home') renderHome(); if (TAB === 'rec') renderRec(); if (TAB === 'memo') renderMemo(); if (TAB === 'set') renderSet(); }
 function calc() { return C.compute(LEDGER, PRICES, Date.now()); }
 function lv(l) { return { ok: '정상', info: '정상', warn: '주의', danger: '위험' }[l]; }
 function pct(v) { return v == null ? '-' : (v * 100).toFixed(1) + '%'; }
 function man(v) { return Math.round(v / 10000).toLocaleString('ko-KR') + '만'; }
 
-// ---------- 홈 ----------
+// ---------- 홈 (재설계): 남은 기간과 자금 상태 → 지출 구성 → 시나리오 → 가정과 계산 기준 ----------
+// 숫자는 전부 core.js(compute)가 계산한 값을 그대로 보여준다. 이 화면은 계산을 바꾸지 않는다.
 function md(d) { return (+d.slice(5, 7)) + '/' + (+d.slice(8, 10)); }
-function donut(parts, total) {
-  var C2 = 2 * Math.PI * 49, acc = 0, s = '<svg viewBox="0 0 140 140" class="donut"><circle cx="70" cy="70" r="49" fill="none" stroke="#edf0f4" stroke-width="22"/>';
-  var tot = parts.reduce(function (a, p) { return a + Math.max(0, p.v); }, 0) || 1;
-  parts.forEach(function (p) {
-    var f = Math.max(0, p.v) / tot; if (f <= 0) return;
-    s += '<circle cx="70" cy="70" r="49" fill="none" stroke="' + p.c + '" stroke-width="22" stroke-dasharray="' + (f * C2).toFixed(2) + ' ' + (C2 - f * C2).toFixed(2) + '" stroke-dashoffset="' + (-acc * C2).toFixed(2) + '" transform="rotate(-90 70 70)"/>';
-    acc += f;
-  });
-  s += '<text x="70" y="64" text-anchor="middle" font-size="10" fill="#6b7280">확보 자금</text>';
-  s += '<text x="70" y="81" text-anchor="middle" font-size="14" font-weight="700" fill="#17202e">' + man(total) + '</text></svg>';
-  return s;
+function ymd(d) { return d.slice(0, 4) + '.' + d.slice(5, 7) + '.' + d.slice(8, 10); }
+function hm(ms) { return new Date(ms).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }); }
+function ago(ms) { var s = Math.max(0, Math.round((Date.now() - ms) / 1000)); if (s < 60) return '방금'; if (s < 3600) return Math.round(s / 60) + '분 전'; if (s < 86400) return Math.round(s / 3600) + '시간 전'; return Math.round(s / 86400) + '일 전'; }
+function dl(d, base) { return d.slice(0, 4) === base.slice(0, 4) ? md(d) : ymd(d); } // 같은 해면 월/일, 다른 해면 연도까지
+function nc(s) { var n = String(s).length; return n > 17 ? ' n-xl' : n > 13 ? ' n-lg' : ''; }
+function barHtml(p, cls) { return '<div class="bar"><i class="' + (cls || '') + '" style="width:' + Math.max(0, Math.min(100, p)).toFixed(1) + '%"></i></div>'; }
+function tabHead(kick, title, desc) { return '<header class="tabhead"><span class="eyebrow">' + kick + '</span><h1>' + title + '</h1>' + (desc ? '<p>' + desc + '</p>' : '') + '</header>'; }
+function sec(id, n, kick, title, note, body, acc, sumline) {
+  if (acc) return '<section class="sec acc" id="sec-' + id + '" aria-labelledby="h-' + id + '"><details class="secd" data-k="sec-' + id + '"' + (OPEN['sec-' + id] ? ' open' : '') + '><summary><span class="sh-t"><span class="eyebrow">' + n + ' · ' + kick + '</span><h2 id="h-' + id + '">' + title + '</h2><span class="ss">' + sumline + '</span></span><i aria-hidden="true"></i></summary><div class="secb">' + body + '</div></details></section>';
+  return '<section class="sec" id="sec-' + id + '" aria-labelledby="h-' + id + '"><div class="sec-head"><div><span class="eyebrow">' + n + ' · ' + kick + '</span><h2 id="h-' + id + '">' + title + '</h2></div>' + (note ? '<span class="note">' + note + '</span>' : '') + '</div>' + body + '</section>';
 }
-function spark(r) {
+var anchLimit = 5, saleLimit = 5;
+function moreBtn(id, total, limit) { return total > limit ? '<button type="button" class="btn gray" id="' + id + '">이전 기록 더 보기 (' + (total - limit) + '건)</button>' : ''; }
+function bindMore() {
+  var a = document.getElementById('moreA'); if (a) a.onclick = function () { anchLimit += 10; renderRec(); };
+  var b = document.getElementById('moreS'); if (b) b.onclick = function () { saleLimit += 10; renderRec(); };
+}
+var BASIS = null, OPEN = {}, lastTouch = 0;
+
+function sparkChart(r) {
   var pts = [];
-  r.anchors.forEach(function (a) { if (pts.length && pts[pts.length - 1].d === a.date) pts[pts.length - 1].v = a.amount; else pts.push({ d: a.date, v: a.amount }); });
+  r.anchors.forEach(function (a) { if (pts.length && pts[pts.length - 1].d === a.date) { pts[pts.length - 1].v = a.amount; pts[pts.length - 1].by = a.by; } else pts.push({ d: a.date, v: a.amount, by: a.by }); });
   if (r.lastAnchor && r.today > r.lastAnchor.date) pts.push({ d: r.today, v: r.balance, est: true });
-  if (pts.length < 2) return '';
+  if (pts.length < 2) return { html: '<div class="empty">잔액을 두 번 이상 입력하면 흐름 그래프가 나와요.</div>', pts: [] };
   var t = function (d) { return Date.parse(d + 'T00:00:00Z'); };
-  var x0 = t(pts[0].d), x1 = t(pts[pts.length - 1].d); if (x1 === x0) return '';
+  var x0 = t(pts[0].d), x1 = t(pts[pts.length - 1].d); if (x1 === x0) return { html: '', pts: [] };
   var vs = pts.map(function (p) { return p.v; }), lo = Math.min.apply(null, vs), hi = Math.max.apply(null, vs); if (hi === lo) { hi += 1; lo -= 1; }
-  var W = 320, H = 70, P = 6, X = function (d) { return P + (W - 2 * P) * (t(d) - x0) / (x1 - x0); }, Y = function (v) { return H - 16 - (H - 26) * (v - lo) / (hi - lo); };
-  var solid = pts.filter(function (p) { return !p.est; }), s = '<svg viewBox="0 0 ' + W + ' ' + H + '" class="spark">';
-  if (solid.length > 1) s += '<polyline fill="none" stroke="#0ea5e9" stroke-width="2" points="' + solid.map(function (p) { return X(p.d).toFixed(1) + ',' + Y(p.v).toFixed(1); }).join(' ') + '"/>';
+  var W = 320, H = 96, P = 10, X = function (d) { return P + (W - 2 * P) * (t(d) - x0) / (x1 - x0); }, Y = function (v) { return H - 22 - (H - 38) * (v - lo) / (hi - lo); };
+  pts.forEach(function (p) { p.x = X(p.d); p.y = Y(p.v); });
+  var solid = pts.filter(function (p) { return !p.est; }), s = '<svg viewBox="0 0 ' + W + ' ' + H + '" class="spark" role="img" aria-label="공금통장 잔액 변화 그래프">';
+  if (solid.length > 1) s += '<polyline class="ln" points="' + solid.map(function (p) { return p.x.toFixed(1) + ',' + p.y.toFixed(1); }).join(' ') + '"/>';
   var le = pts[pts.length - 1];
-  if (le.est) { var pv = solid[solid.length - 1]; s += '<line x1="' + X(pv.d).toFixed(1) + '" y1="' + Y(pv.v).toFixed(1) + '" x2="' + X(le.d).toFixed(1) + '" y2="' + Y(le.v).toFixed(1) + '" stroke="#0ea5e9" stroke-width="2" stroke-dasharray="4 4"/>'; }
-  pts.forEach(function (p) { s += '<circle cx="' + X(p.d).toFixed(1) + '" cy="' + Y(p.v).toFixed(1) + '" r="3" fill="' + (p.est ? '#fff' : '#0ea5e9') + '" stroke="#0ea5e9" stroke-width="1.5"/>'; });
-  s += '<text x="' + P + '" y="' + (H - 2) + '" font-size="10" fill="#9ca3af">' + md(pts[0].d) + '</text><text x="' + (W - P) + '" y="' + (H - 2) + '" font-size="10" fill="#9ca3af" text-anchor="end">' + (le.est ? '오늘(추정)' : md(le.d)) + '</text>';
-  return s + '</svg>';
+  if (le.est) { var pv = solid[solid.length - 1]; s += '<line class="est" x1="' + pv.x.toFixed(1) + '" y1="' + pv.y.toFixed(1) + '" x2="' + le.x.toFixed(1) + '" y2="' + le.y.toFixed(1) + '"/>'; }
+  s += '<line class="cursor" id="sp-cur" x1="' + le.x.toFixed(1) + '" x2="' + le.x.toFixed(1) + '" y1="6" y2="' + (H - 18) + '" opacity="0"/>';
+  pts.forEach(function (p, i) { s += '<circle class="pt' + (p.est ? '' : ' cur') + '" data-i="' + i + '" cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="' + (p.est ? 3.2 : 3.2) + '"/>'; });
+  s += '<text x="' + P + '" y="' + (H - 4) + '">' + md(pts[0].d) + '</text><text x="' + (W - P) + '" y="' + (H - 4) + '" text-anchor="end">' + (le.est ? '오늘(추정)' : md(le.d)) + '</text></svg>';
+  return { html: '<div class="spark-wrap" id="spark-wrap">' + s + '</div><div class="spark-read" id="spark-read" aria-live="polite">그래프를 눌러 날짜별 잔액을 볼 수 있어요</div>', pts: pts, W: W };
 }
+function bindSpark(sp) {
+  var wrap = $('#spark-wrap'); if (!wrap || !sp.pts.length) return;
+  var read = $('#spark-read'), cur = $('#sp-cur');
+  function at(clientX) {
+    var rc = wrap.getBoundingClientRect(), vx = (clientX - rc.left) / rc.width * sp.W, best = 0, bd = 1e9;
+    sp.pts.forEach(function (p, i) { var dd = Math.abs(p.x - vx); if (dd < bd) { bd = dd; best = i; } });
+    var p = sp.pts[best];
+    cur.setAttribute('x1', p.x); cur.setAttribute('x2', p.x); cur.setAttribute('opacity', '1');
+    read.innerHTML = '<b>' + md(p.d) + '</b> · ' + won(p.v) + (p.est ? ' (오늘 추정)' : (p.by ? ' · ' + esc(p.by) + ' 입력' : ''));
+  }
+  var down = false;
+  wrap.addEventListener('pointerdown', function (e) { down = true; lastTouch = Date.now(); at(e.clientX); });
+  wrap.addEventListener('pointermove', function (e) { if (down || e.pointerType === 'mouse') { lastTouch = Date.now(); at(e.clientX); } });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (ev) { wrap.addEventListener(ev, function () { down = false; }); });
+}
+
+function scenarios(r) {
+  var minD = r.settings.alert.minBurnDays;
+  return [
+    { k: 'obs', name: '지금 소비 속도대로', sub: r.burnReady ? '최근 ' + r.burnDays + '일 잔액 기록에서 나온 월 ' + won(r.burnMonthly) + ' · 코인 포함' : null, sim: r.pace, off: r.burnReady ? null : (r.burnDaily == null ? '잔액 기록이 더 필요해요' : '잔액 기록 ' + r.burnDays + '/' + minD + '일 · 자료 부족') },
+    { k: 'plan', name: '계획대로', sub: '설정한 월 ' + won(r.planMonthly) + ' · 코인 포함', sim: r.plan },
+    { k: 'nocoin', name: '코인 없이', sub: '공금통장 + 현금 + 앞으로 들어올 정기 입금 ' + won(r.nonCoinTotal) + '을 한꺼번에 있다고 보고 · 월 ' + won(r.mainMonthly), sim: r.nonCoin },
+    { k: 'joint', name: '코인을 팔기 전까지', sub: '공금통장 + 현금에 정기 입금이 매달 들어온다고 보고 · 월 ' + won(r.mainMonthly) + ' · 이 날부터 코인을 팔아 채워야 해요', sim: r.jointOnly }
+  ];
+}
+
 function renderHome() {
   if (!LEDGER) return;
   lastHome = Date.now();
-  var r = calc(), S = r.settings;
+  var r = calc(), S = r.settings, A = S.alert, la = r.lastAnchor;
   var havePx = PRICES.SOL != null && PRICES.WLD != null;
+  var obsOk = r.burnReady, basis = BASIS || (obsOk ? 'obs' : 'plan'); if (basis === 'obs' && !obsOk) basis = 'plan';
+  var sc = basis === 'obs' ? r.pace : r.plan, monthly = basis === 'obs' ? Math.max(0, r.burnMonthly) : r.planMonthly;
   var h = '';
-  h += '<div class="hero"><div class="hero-top"><b>쮸앤택 Runway</b><span class="pill ' + r.status + '">' + lv(r.status) + '</span></div>';
-  h += '<div class="hero-sub">우리의 1년 Runway · ' + esc(S.periodStart) + ' ~ ' + esc(C.addDays(S.targetDate, -1)) + ' · 나: ' + esc(ME) + '</div>';
-  h += '<div class="hero-nums"><div><small>목표자금</small><b>' + won(r.budgetTotal) + '</b></div><div><small>확보 자금</small><b>' + (havePx ? won(r.secured) : '시세 확인 중') + '</b></div><div><small>남은 기간</small><b>D-' + Math.max(0, r.daysToTarget) + '</b></div></div>' + (r.saved != null ? '<div class="hero-save">월 ' + man(r.planMonthly) + ' 계획 대비 ' + (r.saved >= 0 ? '아낀 돈 <b>+' + won(r.saved) + '</b>' : '더 쓴 돈 <b>' + won(-r.saved) + '</b>') + ' (' + r.savedDays + '일)</div>' : '') + '</div>';
-  var shown = r.alerts.filter(function (a) { return a.key !== 'setup' || true; });
-  if (shown.length) { h += '<div class="alerts">'; shown.forEach(function (a) { h += '<div class="al ' + a.level + '"><b>' + esc(a.title) + '</b><span>' + esc(a.detail) + '</span></div>'; }); h += '</div>'; }
 
-  // 1. 자산 도넛
-  var parts = [{ k: '코인', v: r.coinValue, c: '#6366f1' }, { k: '공금통장', v: Math.max(0, r.balance), c: '#0ea5e9' }, { k: '쮸 입금 예정', v: r.expectedFuture, c: '#f59e0b' }];
-  if (r.cash) parts.push({ k: '현금', v: Math.max(0, r.cash), c: '#10b981' });
-  var ptot = parts.reduce(function (a, p) { return a + Math.max(0, p.v); }, 0) || 1;
-  h += '<div class="card"><h3>1. 자산 <small>' + (PRICE_AT ? '코인원 ' + new Date(PRICE_AT).toLocaleTimeString('ko-KR') + ' 기준' : '') + '</small></h3>';
-  h += '<div class="donut-wrap">' + (havePx ? donut(parts, r.secured) : '<div class="sub">시세 확인 중...</div>') + '<div class="legend">';
-  parts.forEach(function (p) { h += '<div class="lg"><i style="background:' + p.c + '"></i><span>' + p.k + '</span><b>' + (havePx || p.k !== '코인' ? won(p.v) : '-') + '</b><small>' + (havePx ? Math.round(Math.max(0, p.v) / ptot * 100) + '%' : '') + '</small></div>'; });
-  h += '</div></div>';
-  ['SOL', 'WLD'].forEach(function (c) { h += '<div class="row"><span class="k">' + c + ' ' + n2(r.hold[c]) + '개 × ' + (PRICES[c] != null ? won(PRICES[c]) : '-') + '</span><span class="v">' + (havePx ? won(r.coinVal[c]) : '-') + '</span></div>'; });
-  h += '<div class="sub">쮸 입금 예정 = 앞으로 들어올 ' + r.expected.length + '번. 입금일이 지나면 공금통장 쪽으로 옮겨가요. 코인 판 돈(누계 ' + won(r.cashed) + ')은 공금통장에 들어간 걸로 계산해요.</div></div>';
+  // 빠른 이동
+  h += '<nav class="jump" aria-label="홈 안에서 이동"><a href="#sec-state" class="on"><b>1</b>기간·자금</a><a href="#sec-spend"><b>2</b>지출 구성</a><a href="#sec-scen"><b>3</b>시나리오</a><a href="#sec-basis"><b>4</b>계산 기준</a></nav>';
 
-  // 2. 목표자금
-  h += '<div class="card"><h3>2. 목표자금 <small>생활 ' + man(S.budgets.life) + (S.budgetAuto !== false && r.monthsInPeriod ? ' (월 ' + man(S.monthly.life) + ' × ' + r.monthsInPeriod + '개월)' : '') + (+S.budgets.personal ? ' + 개인 ' + man(S.budgets.personal) : '') + (+S.budgets.company ? ' + 회사 ' + man(S.budgets.company) : '') + '</small></h3>';
-  h += '<div class="row"><span class="k">확보 자금 (도넛 합계)</span><span class="v">' + (havePx ? won(r.secured) : '-') + '</span></div>';
-  h += '<div class="row"><span class="k">앞으로 필요한 돈 (예산 − 쓴 돈)</span><span class="v">' + won(r.need) + '</span></div>';
-  h += '<div class="row"><span class="k">확보율</span><span class="v">' + (havePx ? pct(r.coverage) : '-') + '</span></div>';
-  h += '<div class="bar"><i style="width:' + Math.min(100, (r.coverage || 0) * 100) + '%;background:' + (r.surplus >= 0 ? 'var(--ok)' : 'var(--danger)') + '"></i></div>';
-  h += '<div class="row total"><span class="k">' + (r.surplus >= 0 ? '여유자금' : '부족자금') + '</span><span class="v ' + (r.surplus >= 0 ? 'good' : 'bad') + '">' + (havePx ? C.signWon(r.surplus) : '-') + '</span></div>';
-  h += '<div class="sub">코인이 올라도 예산은 늘지 않아요. 오른 만큼은 여유자금으로만 표시돼요.</div></div>';
-
-  // 3. 계획 대비 (아낀 돈) + 남은 예산
-  h += '<div class="card"><h3>3. 계획 대비 <small>월 ' + man(r.planMonthly) + ' 쓰는 계획 기준</small></h3>';
-  if (r.saved == null) {
-    h += '<div class="sub">' + (r.today < S.periodStart ? '계획 시작일(' + md(S.periodStart) + ')부터 잔액 기록으로 계산돼요.' : '공금통장 잔액을 입력하면 계산돼요.') + '</div>';
-  } else {
-    h += '<div class="row"><span class="k">' + (r.saved >= 0 ? '지금까지 아낀 돈' : '지금까지 더 쓴 돈') + '</span><span class="v"><b class="' + (r.saved >= 0 ? 'good' : 'bad') + '" style="font-size:20px">' + (r.saved >= 0 ? '+' : '-') + won(Math.abs(r.saved)) + '</b></span></div>';
-    h += '<div class="hint" style="margin-top:0">' + md(r.savedFrom) + '~오늘 ' + r.savedDays + '일: 계획대로면 ' + won(r.planToDate) + ' 쓸 걸 실제로 ' + won(r.spentToDate) + ' 썼어요 (잔액 변화로 계산)</div>';
-    if (r.projectedSave != null) h += '<div class="row"><span class="k">지금 속도면 ' + md(S.targetDate) + '까지 (예상)</span><span class="v ' + (r.projectedSave >= 0 ? 'good' : 'bad') + '">' + (r.projectedSave >= 0 ? '+' + won(r.projectedSave) + ' 아낌' : won(-r.projectedSave) + ' 더 씀') + '</span></div>';
-    else h += '<div class="hint">잔액 기록이 ' + r.settings.alert.minBurnDays + '일치 쌓이면 목표일까지 얼마나 아낄지 예상해 드려요.</div>';
+  // ===== 1. 남은 기간과 자금 상태 =====
+  var b1 = '';
+  b1 += '<div class="basis" role="group" aria-label="계산 기준 선택"><button type="button" data-basis="obs" aria-pressed="' + (basis === 'obs') + '"' + (obsOk ? '' : ' disabled') + '>관측 기준<small>' + (obsOk ? '실제 소비 속도' : '자료 부족') + '</small></button><button type="button" data-basis="plan" aria-pressed="' + (basis === 'plan') + '">계획 기준<small>설정한 월 지출</small></button></div>';
+  b1 += '<p class="basis-note">' + (basis === 'obs' ? '<b>관측 기준</b> · 최근 ' + r.burnDays + '일 잔액 기록으로 계산한 월 <b class="num">' + won(monthly) + '</b>을 쓴다고 봐요.' : '<b>계획 기준</b> · 설정한 월 <b class="num">' + won(monthly) + '</b>을 쓴다고 봐요.' + (obsOk ? '' : ' 관측 기준은 잔액 기록이 ' + A.minBurnDays + '일 이상 쌓이면 열려요 (지금 ' + r.burnDays + '일).')) + '</p>';
+  b1 += '<div class="runway"><div><div class="lbl">버틸 수 있는 기간 · ' + (basis === 'obs' ? '관측' : '계획') + '</div><div class="rw-num ' + (!havePx ? 'dim' : sc.survives ? 'good' : 'bad') + '">' + (havePx ? C.monthsText(sc.months) : '—') + '</div></div><span class="pill ' + r.status + '">' + lv(r.status) + '</span></div>';
+  if (!havePx) b1 += '<p class="verdict">코인 시세를 받는 중이에요. 시세가 오면 계산돼요.</p>';
+  else {
+    var vt;
+    if (sc.exhaust && sc.survives) vt = '목표일(' + dl(S.targetDate, r.today) + ')은 버티고, <b>' + ymd(sc.exhaust) + '</b>에 바닥나요';
+    else if (sc.exhaust) vt = '<b>' + ymd(sc.exhaust) + '</b>에 바닥나요 · 목표일보다 <b>' + C.diffDays(sc.exhaust, S.targetDate) + '일</b> 일러요';
+    else vt = '<b>5년 넘게</b> 버텨요';
+    b1 += '<p class="verdict ' + (sc.survives ? 'good' : 'bad') + '">' + vt + (sc.atTarget != null ? '<br><span class="sub">목표일에 남는 돈 <b class="num">' + won(sc.atTarget) + '</b></span>' : '') + '</p>';
+    var dTarget = Math.max(1, C.diffDays(r.today, S.targetDate)), dEx = sc.exhaust ? C.diffDays(r.today, sc.exhaust) : null, hz = Math.max(dTarget, dEx || 0, 30);
+    var fillW = sc.exhaust ? dEx / hz * 100 : 100, tgtW = dTarget / hz * 100;
+    b1 += '<div class="tl" role="img" aria-label="오늘부터 바닥나는 날까지의 막대"><i class="tl-fill' + (sc.survives ? '' : ' bad') + '" style="width:' + Math.max(1.5, Math.min(100, fillW)).toFixed(1) + '%"></i><u class="tl-target" style="left:' + Math.min(99.5, tgtW).toFixed(1) + '%"></u></div>';
+    b1 += '<div class="tl-legend"><span>오늘 ' + dl(r.today, r.today) + '</span><span>' + (sc.exhaust ? '바닥 ' + dl(sc.exhaust, r.today) : '5년 이상') + '</span></div><p class="tl-cap">점선은 목표일 ' + dl(S.targetDate, r.today) + '</p>';
   }
-  [['life', '생활 (공동)', 'var(--life)'], ['personal', '개인 (택)', 'var(--personal)'], ['company', '회사', 'var(--company)']].forEach(function (b) {
-    var tot = +S.budgets[b[0]] || 0, rem = r.remaining[b[0]], p = tot ? Math.max(0, rem) / tot : 0;
-    if (!tot && !r.used[b[0]]) return;
-    h += '<div class="bucket" style="border-top:1px solid var(--line);margin-top:8px"><div class="top"><span><i class="dot" style="background:' + b[2] + '"></i><b>' + b[1] + ' 남은 예산</b></span><span><b class="' + (rem < 0 ? 'bad' : '') + '">' + won(rem) + '</b> <span class="muted">/ ' + man(tot) + '</span></span></div>';
-    h += '<div class="bar"><i style="width:' + (p * 100) + '%;background:' + b[2] + '"></i></div><div class="sub">쓴 돈 ' + won(r.used[b[0]]) + ' · 남은 비율 ' + Math.round(p * 100) + '%</div></div>';
-  });
-  h += '</div>';
+  var secured = havePx ? won(r.secured) : '시세 확인 중';
+  b1 += '<div class="stats"><div class="stat"><span class="lbl">남은 기간</span><span class="val num">D-' + Math.max(0, r.daysToTarget) + '</span><span class="sm">' + ymd(r.today) + ' → ' + ymd(S.targetDate) + '</span></div>';
+  b1 += '<div class="stat"><span class="lbl">' + (r.surplus >= 0 ? '여유 자금' : '부족 자금') + '</span><span class="val num ' + (havePx ? (r.surplus >= 0 ? 'good' : 'bad') : '') + nc(havePx ? C.signWon(r.surplus) : '') + '">' + (havePx ? C.signWon(r.surplus) : '—') + '</span><span class="sm">확보 ' + secured + ' − 필요 ' + won(r.need) + '</span></div></div>';
 
-  // 4. 공금통장
-  var la = r.lastAnchor;
-  h += '<div class="card"><h3>4. 공금통장 (토스뱅크) <small>' + (la ? '마지막 입력 ' + md(la.date) + ' ' + esc(la.by || '') : '') + '</small></h3>';
-  h += '<div class="row"><span class="k">지금 잔액' + (la && r.daysSince > 0 ? ' (추정)' : '') + '</span><span class="v"><b class="' + (r.balance < 0 ? 'bad' : '') + '" style="font-size:19px">' + won(r.balance) + '</b> <button class="mini" id="jbEdit">잔액 입력</button></span></div>';
+  // 자료 기준
+  var syncTxt, syncCls = '';
+  if (SYNC_AT && !SYNC_FAIL) syncTxt = '서버 ' + ago(SYNC_AT);
+  else if (SYNC_FAIL) { syncTxt = (CACHE_AT ? '불러오기 실패 · 저장본 ' + ago(CACHE_AT) : '불러오기 실패'); syncCls = 'stale'; }
+  else { syncTxt = CACHE_AT ? '저장본 ' + ago(CACHE_AT) + ' (갱신 중)' : '확인 중'; syncCls = 'stale'; }
+  var staleDays = la ? C.diffDays(la.date, r.today) : null;
+  var pxCls = havePx ? '' : 'miss', balCls = !la ? 'miss' : staleDays > A.staleDays ? 'stale' : '';
+  var provSum = '<span class="pc"><i class="dot ' + pxCls + '"></i>' + (havePx ? '시세 ' + (PRICE_AT ? hm(PRICE_AT) : '수신') : '시세 대기') + '</span><span class="pc"><i class="dot ' + balCls + '"></i>' + (la ? '잔액 ' + md(la.date) : '잔액 없음') + '</span><span class="pc"><i class="dot ' + syncCls + '"></i>' + (SYNC_FAIL ? '동기화 실패' : SYNC_AT ? '동기화 ' + ago(SYNC_AT) : '동기화 중') + '</span>';
+  b1 += '<details class="prov" data-k="prov"' + (OPEN.prov ? ' open' : '') + '><summary><span class="ps-t">자료 기준</span><span class="ps-c">' + provSum + '</span><i aria-hidden="true"></i></summary><dl>';
+  b1 += '<div class="pr"><dt>오늘 (한국시간)</dt><dd>' + ymd(r.today) + '</dd></div>';
+  b1 += '<div class="pr"><dt>코인 시세</dt><dd><i class="dot ' + (havePx ? '' : 'miss') + '"></i>' + (havePx ? '코인원 ' + (PRICE_AT ? hm(PRICE_AT) : '수신') + ' 기준' : '아직 못 받음') + '</dd></div>';
+  b1 += '<div class="pr"><dt>공금통장 잔액</dt><dd><i class="dot ' + (!la ? 'miss' : staleDays > A.staleDays ? 'stale' : '') + '"></i>' + (la ? md(la.date) + ' 입력' + (staleDays > 0 ? ' · ' + staleDays + '일 전' : ' · 오늘') + (la.by ? ' · ' + esc(la.by) : '') : '입력 없음') + '</dd></div>';
+  b1 += '<div class="pr"><dt>소비 속도</dt><dd><i class="dot ' + (obsOk ? '' : 'stale') + '"></i>' + (r.burnDaily == null ? '계산 전' : '잔액 기록 ' + r.burnDays + '일치' + (obsOk ? '' : ' (최소 ' + A.minBurnDays + '일)')) + '</dd></div>';
+  b1 += '<div class="pr"><dt>기록 동기화</dt><dd><i class="dot ' + syncCls + '"></i>' + syncTxt + '</dd></div>';
+  b1 += '</dl></details>';
+
+  // 부족한 자료 / 경고
+  var gaps = [];
+  if (!havePx) gaps.push({ t: '코인 시세를 아직 못 받았어요. 평가액과 런웨이 계산이 보류돼요.' });
+  if (!la) gaps.push({ t: '공금통장 잔액 기록이 없어요. 관측 기준(실제 소비 속도)을 만들 수 없어요.', go: '잔액 입력' });
+  else if (!obsOk) gaps.push({ t: r.burnDaily == null ? '잔액을 한 번 더 입력해야 관측 기준이 열려요.' : r.burnDaily <= 0 ? '입력 사이에 잔액이 늘었어요. 기록 안 된 입금이 있을 수 있어서 계획 기준으로 계산 중이에요.' : '잔액 기록이 ' + r.burnDays + '일치예요. 최소 ' + A.minBurnDays + '일이 쌓이면 관측 기준이 열려요.', go: '잔액 입력' });
+  if (la && staleDays > A.staleDays) gaps.push({ t: '잔액을 ' + staleDays + '일째 안 적었어요. 추정이 실제와 멀어질 수 있어요.', go: '잔액 입력' });
+  if (!S.confirmed) gaps.push({ t: '시작 숫자(코인 수량·현금)를 아직 확인하지 않았어요.', go: '설정 열기', tab: 'set' });
+  if (r.overdue.length) gaps.push({ t: '날짜가 지난 예정 출금이 ' + r.overdue.length + '건 있어요. 실제로 나갔으면 기록하고 완료 처리해 주세요.', go: '기록 열기', tab: 'rec' });
+  if (gaps.length) {
+    b1 += '<div class="gaps"><h3>부족한 자료 ' + gaps.length + '건</h3><ul>';
+    gaps.forEach(function (g) { b1 += '<li><span>' + esc(g.t) + '</span>' + (g.go ? '<button type="button" class="go" ' + (g.tab ? 'data-gotab="' + g.tab + '"' : 'data-jb="1"') + '>' + g.go + '</button>' : '') + '</li>'; });
+    b1 += '</ul></div>';
+  } else b1 += '<div class="gaps ok"><h3>필요한 자료가 모두 있어요</h3></div>';
+  var dataKeys = { no_balance: 1, stale: 1, setup: 1, overdue: 1 };
+  r.alerts.filter(function (a) { return !dataKeys[a.key]; }).forEach(function (a) { b1 += '<div class="al ' + a.level + '"><b>' + esc(a.title) + '</b><span>' + esc(a.detail) + '</span></div>'; });
+
+  // 자금 구성
+  var parts = [{ k: '코인', v: r.coinValue, c: 'var(--c-coin)' }, { k: '공금통장 (추정)', v: Math.max(0, r.balance), c: 'var(--c-joint)' }];
+  if (r.cash) parts.push({ k: '현금', v: Math.max(0, r.cash), c: 'var(--c-cash)' });
+  parts.push({ k: '정기 입금 예정', v: r.expectedFuture, c: 'var(--c-exp)' });
+  var ptot = parts.reduce(function (a, p) { return a + Math.max(0, p.v); }, 0) || 1;
+  b1 += '<div class="sub-h"><h3>확보 자금 구성</h3><small>' + (PRICE_AT ? '코인원 ' + hm(PRICE_AT) + ' 기준' : '') + '</small></div>';
+  b1 += havePx ? '<div class="stack" role="img" aria-label="확보 자금 구성 비율">' + parts.map(function (p) { return '<i style="width:' + (Math.max(0, p.v) / ptot * 100).toFixed(2) + '%;background:' + p.c + '"></i>'; }).join('') + '</div>' : '<div class="skel"></div>';
+  b1 += '<ul class="legend">';
+  parts.forEach(function (p) {
+    var isCoin = p.k === '코인', sub = '';
+    if (p.k === '정기 입금 예정') sub = '앞으로 ' + r.expected.length + '번';
+    b1 += '<li class="lg"><i style="background:' + p.c + '"></i><span class="t">' + p.k + '</span><span class="v">' + (havePx || !isCoin ? won(p.v) : '-') + '</span>' + (havePx ? '<span class="s">' + Math.round(Math.max(0, p.v) / ptot * 100) + '%' + (sub ? ' · ' + sub : '') + '</span>' : '') + '</li>';
+  });
+  b1 += '</ul>';
+  if (havePx) b1 += '<details class="mini-d" data-k="d-coin"' + (OPEN['d-coin'] ? ' open' : '') + '><summary>코인 상세 (수량 × 시세)</summary><ul class="coinl">' + ['SOL', 'WLD'].map(function (c) { return '<li><span>' + c + ' ' + n2(r.hold[c]) + '개 × ' + won(PRICES[c]) + '</span><b class="num">' + won(r.coinVal[c]) + '</b></li>'; }).join('') + '</ul></details>';
+  b1 += '<div class="target"><div class="top"><b>목표 자금 ' + won(r.budgetTotal) + '</b><span>' + (havePx ? '확보율 ' + pct(r.coverage) : '-') + '</span></div>' + (havePx ? barHtml(Math.min(100, (r.coverage || 0) * 100), r.surplus >= 0 ? '' : 'bad') : '<div class="skel"></div>') + '<details class="mini-d" data-k="d-target"' + (OPEN['d-target'] ? ' open' : '') + '><summary>계산 근거</summary><p>확보 ' + secured + ' · 앞으로 필요한 돈(예산 − 쓴 돈) ' + won(r.need) + '. 코인이 올라도 목표 자금은 늘지 않고, 오른 만큼은 여유 자금으로만 보여요.</p></details></div>';
+
+  // 공금통장
+  var sp = sparkChart(r);
+  var balTxt = won(r.balance);
+  b1 += '<div class="bal"><div class="bal-top"><div><span class="lbl">공금통장 잔액' + (la && r.daysSince > 0 ? ' (추정)' : '') + '</span><span class="big num' + nc(balTxt) + (r.balance < 0 ? ' bad' : '') + '">' + balTxt + '</span></div><button type="button" class="btn-s" id="jbEdit">잔액 입력</button></div>';
   if (la) {
     var bd = '입력한 잔액 ' + won(r.balanceBase) + ' (' + md(la.date) + ')';
     if (r.inflowSince) bd += ' + 그 뒤 들어온 돈 ' + won(r.inflowSince);
     if (r.spendEstSince) bd += ' − 그 뒤 쓴 돈 추정 ' + won(r.spendEstSince) + ' (' + (r.burnReady ? '소비 속도' : '계획') + ' 기준 하루 ' + won(r.dailyEst) + ' × ' + r.daysSince + '일)';
-    h += '<div class="hint" style="margin-top:0">' + bd + '</div>';
-  } else h += '<div class="hint" style="margin-top:0">토스뱅크 앱에서 잔액을 보고 "잔액 입력"을 눌러 주세요. 두 번 이상 입력하면 소비 속도가 나와요.</div>';
-  h += spark(r);
-  var burnTxt = r.burnDaily == null ? '아직 계산 전' : r.burnDaily <= 0 ? '잔액이 오히려 늘었어요' : '하루 ' + won(r.burnDaily) + ' · 월 ' + won(r.burnMonthly);
-  h += '<div class="row"><span class="k">소비 속도</span><span class="v">' + burnTxt + '</span></div>';
-  h += '<div class="hint" style="margin-top:0">' + (r.burnDaily == null ? '잔액을 며칠 간격으로 두 번 이상 입력하면 계산돼요' : r.burnDaily <= 0 ? '기록 안 된 입금이 있었을 수 있어요. 입금을 적어 주면 정확해져요. 런웨이는 계획 금액으로 계산해요' : '잔액 기록 ' + r.burnDays + '일치 기준' + (r.burnReady ? '' : ' (' + r.settings.alert.minBurnDays + '일 이상 쌓이면 런웨이에 반영)')) + '</div>';
-  h += '<div class="row"><span class="k">이번 달 쓴 돈 (추정)</span><span class="v">' + won(Math.max(0, r.spentThisMonth)) + ' <span class="muted">/ 계획 ' + man(r.planMonthly) + '</span></span></div>';
-  if (r.expected.length) h += '<div class="row"><span class="k">다음 입금</span><span class="v good">' + md(r.expected[0].due) + ' ' + esc(r.expected[0].who) + ' +' + won(r.expected[0].amount) + '</span></div><div class="hint" style="margin-top:0">입금일이 되면 잔액에 자동으로 더해져요. 안 들어왔으면 기록 → 공금통장에서 "안 들어왔어요"를 눌러 주세요.</div>';
-  h += '</div>';
+    b1 += '<details class="mini-d" data-k="d-bal"' + (OPEN['d-bal'] ? ' open' : '') + '><summary>잔액 추정 근거</summary><p>' + bd + '</p></details>';
+  } else b1 += '<p class="hint">토스뱅크 앱에서 잔액을 보고 "잔액 입력"을 눌러 주세요. 두 번 이상 입력하면 소비 속도가 나와요.</p>';
+  b1 += sp.html;
+  if (r.expected.length) b1 += '<div class="kv"><span class="k">다음 정기 입금</span><span class="v good">' + md(r.expected[0].due) + ' ' + esc(r.expected[0].who) + ' +' + won(r.expected[0].amount) + '</span></div><p class="hint">입금일이 되면 잔액에 자동으로 더해져요. 안 들어왔으면 기록 → 공금통장에서 "안 들어왔어요"를 눌러 주세요.</p>';
+  b1 += '</div>';
+  h += sec('state', '01', 'TIME &amp; FUNDS', '남은 기간과 자금 상태', '', b1);
 
-  // 5. 런웨이
-  var mm = r.main;
-  h += '<div class="card"><h3>5. 남은 런웨이 <small>' + (r.burnReady ? '지금 소비 속도 기준' : '계획 기준 (소비 속도 쌓이는 중)') + '</small></h3>';
-  h += '<div class="big ' + (mm.survives ? 'good' : 'bad') + '">' + (havePx ? C.monthsText(mm.months) : '-') + '</div>';
-  if (havePx) {
-    if (mm.exhaust) h += '<div class="sub">' + (mm.survives ? '목표일(' + S.targetDate + ')은 버티고 ' : '') + '<b>' + mm.exhaust + '</b>에 바닥나요' + (mm.atTarget != null ? ' · 목표일에 남는 돈 ' + won(mm.atTarget) : '') + '</div>';
-    else h += '<div class="sub">5년 넘게 버텨요' + (mm.atTarget != null ? ' · 목표일에 남는 돈 ' + won(mm.atTarget) : '') + '</div>';
-    h += '<div class="row" style="margin-top:8px"><span class="k">소비 속도 기준' + (r.burnReady ? ' (월 ' + man(r.burnMonthly) + ')' : '') + '</span><span class="v">' + (r.pace ? C.monthsText(r.pace.months) : '잔액 기록 ' + r.settings.alert.minBurnDays + '일치 필요') + '</span></div>';
-    h += '<div class="row"><span class="k">계획 기준 (월 ' + man(r.planMonthly) + ')</span><span class="v">' + C.monthsText(r.plan.months) + '</span></div>';
-    if (r.monthlyGap > 0) {
-      var sellEq = []; if (PRICES.SOL) sellEq.push('SOL ' + (Math.ceil(r.monthlyGap / PRICES.SOL * 100) / 100) + '개'); if (PRICES.WLD) sellEq.push('WLD ' + Math.ceil(r.monthlyGap / PRICES.WLD).toLocaleString('ko-KR') + '개');
-      h += '<div class="row"><span class="k">매달 코인에서 채울 돈</span><span class="v">월 ' + won(r.monthlyGap) + '</span></div>';
-      h += '<div class="hint" style="margin-top:0">월 ' + man(r.mainMonthly) + ' 쓰는데 정기 입금이 ' + man(r.recurringMonthly) + '이라서, 모자란 만큼 코인을 팔아야 해요. 지금 시세로 ' + sellEq.join(' 또는 ') + ' (계산값일 뿐 매도 권유 아님)</div>';
-    }
-    h += '<div class="row" style="margin-top:6px;border-top:1px solid var(--line);padding-top:10px"><span class="k">코인 없이 버티는 기간<br><small class="muted">공금통장 + 앞으로 들어올 쮸 입금 ' + man(r.nonCoinTotal) + '</small></span><span class="v">' + (r.nonCoin.exhaust ? r.nonCoin.exhaust + '까지<br><small class="muted">' + C.monthsText(r.nonCoin.months) + '치</small>' : '5년 이상') + '</span></div>';
-    h += '<div class="row"><span class="k">코인을 처음 팔아야 하는 날</span><span class="v ' + (r.jointOnly.exhaust && C.diffDays(r.today, r.jointOnly.exhaust) <= 30 ? 'warnc' : '') + '">' + (r.jointOnly.exhaust || '없음') + '</span></div>';
-    if (r.jointOnly.exhaust && r.nonCoin.exhaust && r.jointOnly.exhaust < r.nonCoin.exhaust && r.recurringMonthly > 0) h += '<div class="hint" style="margin-top:0">쮸 입금은 한꺼번에가 아니라 매달 ' + man(r.recurringMonthly) + '씩 들어와요. 월 ' + man(r.mainMonthly) + '을 쓰면 매달 ' + man(r.monthlyGap) + '씩 모자라서, 이날쯤부터 코인을 팔아 채워야 해요.</div>';
-    h += '<div class="row"><span class="k">목표일까지 코인에서 나와야 하는 돈</span><span class="v">' + won(r.coinNeedToTarget) + (r.coinValue > 0 ? '<br><small class="muted">지금 코인의 ' + Math.round(r.coinNeedToTarget / r.coinValue * 100) + '%</small>' : '') + '</span></div>';
-    h += '<div class="hint">맨 위 런웨이는 코인까지 합쳐서, 공금통장이 비면 코인을 팔아 채운다고 보고 계산해요.</div>';
+  // ===== 2. 지출 구성 =====
+  var b2 = '';
+  var scale = Math.max(r.planMonthly, r.burnMonthly > 0 ? r.burnMonthly : 0, r.recurringMonthly, 1);
+  b2 += '<div class="sub-h" style="margin-top:2px"><h3>한 달 지출 비교</h3><small>월 기준</small></div><ul class="cmp">';
+  b2 += '<li><div class="top"><span>계획 (설정한 월 지출)</span><span class="num">' + won(r.planMonthly) + '</span></div>' + barHtml(r.planMonthly / scale * 100) + '</li>';
+  if (r.burnDaily == null) b2 += '<li><div class="top"><span>관측 (실제 소비 속도)</span><span>자료 부족</span></div><div class="none">잔액을 며칠 간격으로 두 번 이상 입력하면 계산돼요.</div></li>';
+  else if (r.burnDaily <= 0) b2 += '<li><div class="top"><span>관측 (실제 소비 속도)</span><span>잔액이 늘었어요</span></div><div class="none">기록 안 된 입금이 있었을 수 있어요. 입금을 적어 주면 정확해져요. 런웨이는 계획 금액으로 계산해요.</div></li>';
+  else b2 += '<li><div class="top"><span>관측 (실제 소비 속도)</span><span class="num ' + (r.burnMonthly > r.planMonthly * A.paceWarn ? 'bad' : '') + '">' + won(r.burnMonthly) + '</span></div>' + barHtml(r.burnMonthly / scale * 100, r.burnMonthly > r.planMonthly * A.paceWarn ? 'bad' : '') + '<div class="foot">하루 ' + won(r.burnDaily) + ' · 계획 대비 ' + (r.planMonthly > 0 ? Math.round(r.burnMonthly / r.planMonthly * 100) + '%' : '-') + ' · 잔액 기록 ' + r.burnDays + '일치' + (obsOk ? '' : ' (최소 ' + A.minBurnDays + '일 전이라 런웨이에는 아직 안 써요)') + '</div></li>';
+  b2 += '<li><div class="top"><span>매달 들어오는 정기 입금</span><span class="num">' + won(r.recurringMonthly) + '</span></div>' + barHtml(r.recurringMonthly / scale * 100, 'warn') + (r.monthlyGap > 0 ? '<div class="foot">월 ' + won(r.mainMonthly) + ' 쓰면 매달 ' + won(r.monthlyGap) + '이 모자라요</div>' : '') + '</li></ul>';
+  var spentM = Math.max(0, r.spentThisMonth), mp = r.planMonthly > 0 ? spentM / r.planMonthly * 100 : 0;
+  b2 += '<div class="sub-h"><h3>이번 달</h3><small>' + r.ym.replace('-', '.') + ' · 추정</small></div><div class="cmp"><div class="top"><span>쓴 돈</span><span class="num">' + won(spentM) + ' <span class="sub">/ 계획 ' + man(r.planMonthly) + '</span></span></div>' + barHtml(mp, mp > 100 ? 'bad' : '') + '</div>';
+  b2 += '<div class="sub-h"><h3>계획 대비 누적</h3><small>월 ' + man(r.planMonthly) + ' 계획 기준</small></div>';
+  if (r.saved == null) b2 += '<div class="empty">' + (r.today < S.periodStart ? '계획 시작일(' + md(S.periodStart) + ')부터 잔액 기록으로 계산돼요.' : '공금통장 잔액을 입력하면 계산돼요.') + '</div>';
+  else {
+    var svTxt = (r.saved >= 0 ? '+' : '-') + won(Math.abs(r.saved));
+    b2 += '<div class="savedbox"><span class="lbl">' + (r.saved >= 0 ? '지금까지 아낀 돈' : '지금까지 더 쓴 돈') + ' · ' + md(r.savedFrom) + '~오늘 ' + r.savedDays + '일</span><span class="big num ' + (r.saved >= 0 ? 'good' : 'bad') + nc(svTxt) + '">' + svTxt + '</span><p class="hint" style="margin-top:2px">계획대로면 ' + won(r.planToDate) + ' 쓸 걸 실제로 ' + won(r.spentToDate) + ' 썼어요 (잔액 변화로 계산)</p>';
+    if (r.projectedSave != null) b2 += '<div class="kv" style="margin-top:8px"><span class="k">지금 속도면 ' + dl(S.targetDate, r.today) + '까지</span><span class="v ' + (r.projectedSave >= 0 ? 'good' : 'bad') + '">' + (r.projectedSave >= 0 ? '+' + won(r.projectedSave) + ' 아낌' : won(-r.projectedSave) + ' 더 씀') + '</span></div>';
+    else b2 += '<p class="hint">잔액 기록이 ' + A.minBurnDays + '일치 쌓이면 목표일까지 얼마나 아낄지 예상해 드려요.</p>';
+    b2 += '</div>';
   }
-  h += '</div>';
+  var bks = [['life', '생활 (공동)', 'var(--c-life)'], ['personal', '개인 (택)', 'var(--c-personal)'], ['company', '회사', 'var(--c-company)']], bkHtml = '';
+  bks.forEach(function (b) {
+    var tot = +S.budgets[b[0]] || 0, rem = r.remaining[b[0]], used = r.used[b[0]], p = tot ? Math.max(0, rem) / tot * 100 : 0;
+    if (!tot && !used) return;
+    bkHtml += '<div class="bucket"><div class="top"><b><i style="background:' + b[2] + '"></i>' + b[1] + ' 남은 예산</b><span class="' + (rem < 0 ? 'bad' : '') + '">' + won(rem) + ' <em>/ ' + man(tot) + '</em></span></div><div class="bar"><i style="width:' + p.toFixed(1) + '%;background:' + (rem < 0 ? 'var(--bad)' : b[2]) + '"></i></div><p class="hint" style="margin-top:5px">쓴 돈 ' + won(used) + ' · 남은 비율 ' + Math.round(p) + '%</p></div>';
+  });
+  b2 += '<div class="sub-h"><h3>예산별 남은 돈</h3><small>목표 기간 전체</small></div>' + (bkHtml || '<div class="empty">설정한 예산이 없어요.</div>');
+  b2 += '<div class="sub-h"><h3>앞으로 예정된 입금·출금</h3><small>' + (r.expected.length + r.planned.length) + '건</small></div><ul class="sched">';
+  r.expected.slice(0, 3).forEach(function (e) { b2 += '<li><span class="d">' + esc(e.due) + '<small>' + esc(e.who) + ' 공금통장 입금</small></span><span class="a good">+' + won(e.amount) + '</span></li>'; });
+  r.planned.slice(0, 8).forEach(function (x) { b2 += '<li><span class="d">' + esc(x.date) + '<small>' + (x.memo ? esc(x.memo) : '예정 출금') + '</small></span><span class="a bad">-' + won(x.amount) + '</span></li>'; });
+  if (!r.expected.length && !r.planned.length) b2 += '<li><span class="d">예정된 입금·출금이 없어요.</span></li>';
+  b2 += '</ul>';
+  var sumSpend = '계획 월 ' + man(r.planMonthly) + ' · 관측 ' + (r.burnDaily != null && r.burnDaily > 0 ? '월 ' + man(r.burnMonthly) : '자료 부족') + ' · 이번 달 ' + man(spentM);
+  h += sec('spend', '02', 'SPENDING', '지출 구성', '', b2, true, sumSpend);
 
-  // 예정 입금·출금
-  h += '<div class="card"><h3>앞으로 예정된 입금·출금</h3>';
-  r.expected.slice(0, 3).forEach(function (e) { h += '<div class="row"><span class="k">' + esc(e.due) + ' · ' + esc(e.who) + ' 공금통장 입금</span><span class="v good">+' + won(e.amount) + '</span></div>'; });
-  if (!r.planned.length) h += '<div class="sub">예정된 큰 출금이 없어요.</div>';
-  r.planned.slice(0, 8).forEach(function (x) { h += '<div class="row"><span class="k">' + esc(x.date) + (x.memo ? ' · ' + esc(x.memo) : '') + '</span><span class="v bad">-' + won(x.amount) + '</span></div>'; });
-  h += '</div>';
+  // ===== 3. 시나리오 =====
+  var b3 = '<p class="sub" style="margin:0 0 6px">같은 자산으로 어떤 가정에서 언제 바닥나는지 비교해요. 막대는 오늘부터 바닥나는 날까지, 점선은 목표일이에요.</p>';
+  var list = scenarios(r), dT = Math.max(1, C.diffDays(r.today, S.targetDate)), hz3 = dT;
+  list.forEach(function (s) { if (!s.off && s.sim && s.sim.exhaust) hz3 = Math.max(hz3, C.diffDays(r.today, s.sim.exhaust)); });
+  b3 += '<ul class="scs">';
+  list.forEach(function (s) {
+    var tag = (s.k === basis ? '<span class="tag">위 요약 기준</span>' : ''), tg = Math.min(99.5, dT / hz3 * 100);
+    if (s.off || !havePx) { b3 += '<li class="sc off"><div class="sc-top"><b>' + s.name + '</b><span class="sc-val">' + (s.off || '시세 확인 중') + '</span></div><div class="tl"><i class="tl-fill dash" style="width:100%"></i><u class="tl-target" style="left:' + tg.toFixed(1) + '%"></u></div></li>'; return; }
+    var ex = s.sim.exhaust, w = ex ? C.diffDays(r.today, ex) / hz3 * 100 : 100, ok = s.sim.survives;
+    b3 += '<li class="sc"><div class="sc-top"><b>' + s.name + tag + '</b><span class="sc-val ' + (ok ? '' : 'bad') + '">' + (ex ? dl(ex, r.today) + ' · ' + C.monthsText(s.sim.months) : '5년 이상') + '</span></div><div class="tl"><i class="tl-fill' + (ok ? '' : ' bad') + '" style="width:' + Math.max(1.5, Math.min(100, w)).toFixed(1) + '%"></i><u class="tl-target" style="left:' + tg.toFixed(1) + '%"></u></div><p class="sc-sub">' + s.sub + (s.sim.atTarget != null ? ' · 목표일에 남는 돈 ' + won(s.sim.atTarget) : '') + '</p></li>';
+  });
+  b3 += '</ul>';
+  if (havePx) {
+    var eq = []; if (PRICES.SOL) eq.push('SOL ' + (Math.ceil(r.monthlyGap / PRICES.SOL * 100) / 100) + '개'); if (PRICES.WLD) eq.push('WLD ' + Math.ceil(r.monthlyGap / PRICES.WLD).toLocaleString('ko-KR') + '개');
+    b3 += '<div class="need"><h3>코인에서 채워야 하는 돈</h3>';
+    b3 += '<div class="kv"><span class="k">코인을 처음 팔아야 하는 날</span><span class="v">' + (r.jointOnly.exhaust ? ymd(r.jointOnly.exhaust) : '없음') + '</span></div>';
+    if (r.monthlyGap > 0) b3 += '<div class="kv"><span class="k">매달 채울 돈</span><span class="v">월 ' + won(r.monthlyGap) + '<small>지금 시세로 ' + eq.join(' 또는 ') + '</small></span></div>';
+    b3 += '<div class="kv"><span class="k">목표일까지 코인에서 나와야 하는 돈</span><span class="v">' + won(r.coinNeedToTarget) + (r.coinValue > 0 ? '<small>지금 코인의 ' + Math.round(r.coinNeedToTarget / r.coinValue * 100) + '%</small>' : '') + '</span></div>';
+    b3 += '<p class="hint">계산값일 뿐 매도 권유가 아니에요. 코인 시세가 바뀌면 달라져요.</p></div>';
+  }
+  var sumScen = (r.pace ? '관측 ' + (r.pace.exhaust ? dl(r.pace.exhaust, r.today) : '5년+') : '관측 자료 부족') + ' · 계획 ' + (r.plan.exhaust ? dl(r.plan.exhaust, r.today) : '5년+') + ' · 코인 처음 파는 날 ' + (r.jointOnly.exhaust ? dl(r.jointOnly.exhaust, r.today) : '없음');
+  h += sec('scen', '03', 'SCENARIOS', '시나리오 비교', '', b3, true, havePx ? sumScen : '시세를 받으면 계산돼요');
+
+  // ===== 4. 가정과 계산 기준 =====
+  var rec0 = (S.recurring && S.recurring[0]) || null;
+  var L = [
+    ['asm-sum', '숫자가 무엇을 합친 건가요', '<ul><li><b>확보 자금</b> = 코인(보유 수량 × 코인원 최근 체결가) + 공금통장 잔액(추정) + 현금 + 앞으로 들어올 정기 입금' + (rec0 && +rec0.amount > 0 ? ' (' + esc(rec0.who) + ' 매월 ' + won(rec0.amount) + ')' : '') + '</li><li><b>목표 자금</b> = 월 생활비' + (S.budgetAuto !== false && r.monthsInPeriod ? ' ' + man(S.monthly.life) + ' × ' + r.monthsInPeriod + '개월' : '') + ' + 개인 예산 + 회사 예산. 코인이 올라도 늘지 않아요.</li><li><b>여유·부족 자금</b> = 확보 자금 − 앞으로 필요한 돈(예산 − 쓴 돈)</li></ul>'],
+    ['asm-obs', '관측 기준(실제 소비 속도)은 어떻게 나오나요', '<ul><li>잔액을 입력한 날 사이마다 <b>(직전 잔액 + 그 사이 들어온 돈 − 이번 잔액) ÷ 날짜</b>로 하루 소비를 구해요.</li><li>최근 90일 안의 구간만 쓰고, 잔액 기록이 <b>' + A.minBurnDays + '일 이상</b> 쌓여야 런웨이에 반영돼요 (지금 ' + r.burnDays + '일).</li><li>입력 사이에 잔액이 오히려 늘었으면 기록 안 된 입금이 있었다고 보고 계획 금액을 써요.</li><li>마지막 입력 뒤의 잔액은 그 뒤 들어온 돈을 더하고 하루 소비 × 지난 날을 뺀 <b>추정값</b>이에요.</li></ul>'],
+    ['asm-sim', '런웨이는 어떻게 시뮬레이션하나요', '<ul><li>오늘부터 하루씩 한 달 소비를 날짜 수로 나눠 빼요. 예정 출금은 그날 빼고, 정기 입금은 그날 더해요.</li><li>돈이 0 아래로 내려가는 첫 날이 <b>바닥나는 날</b>이에요. 5년 넘게 안 내려가면 "5년 이상"이에요.</li><li>코인은 지금 시세 그대로 두고 계산해요. 가격 변동, 수수료, 세금은 반영하지 않아요.</li><li>"계획 기준"은 설정한 월 지출(' + man(r.planMonthly) + '), "관측 기준"은 실제 소비 속도를 써요.</li></ul>'],
+    ['asm-alert', '경고와 알림 기준', '<ul><li>소비 속도가 계획의 <b>' + Math.round(A.paceWarn * 100) + '%</b>를 넘으면 주의, <b>' + Math.round(A.paceDanger * 100) + '%</b>를 넘으면 위험이에요.</li><li>목표일에 남는 돈이 <b>' + A.cushionMonths + '개월치</b> 미만이면 주의, 잔액을 <b>' + A.staleDays + '일</b> 넘게 안 적으면 안내, 공금통장이 <b>' + A.jointWarnDays + '일</b> 안에 바닥나면 알려요.</li><li>이 화면의 경고만 해당돼요. 텔레그램은 코인 급변 알림만 보내요.</li></ul>'],
+    ['asm-limit', '이 화면의 한계', '<ul><li>기록하지 않은 지출과 입금은 반영되지 않아요. 잔액을 자주 입력할수록 정확해요.</li><li>코인 시세는 코인원 최근 체결가예요. 실제 판매 금액은 호가와 수수료에 따라 달라요.</li><li>시나리오는 통계가 아니라 단순 계산이고, 매도 권유가 아니에요.</li></ul>']
+  ];
+  var b4 = '';
+  L.forEach(function (x) { b4 += '<details class="asm" data-k="' + x[0] + '"' + (OPEN[x[0]] ? ' open' : '') + '><summary>' + x[1] + '<i aria-hidden="true"></i></summary><div class="in">' + x[2] + '</div></details>'; });
+  h += sec('basis', '04', 'ASSUMPTIONS', '가정과 계산 기준', '', b4, true, '확보 자금·관측 속도·시뮬레이션·알림·한계');
+  h += '<footer class="pagefoot">택 앤 쭈 런웨이 · 수수료·세금 제외 · 투자 조언이 아니에요<br>RUNWAY 2026.10.02</footer>';
+
+  var keepY = window.scrollY;
   $('#tab-home').innerHTML = h;
+  var mc = $('#me-chip'); if (mc) mc.textContent = ME || '-';
   var jbE = $('#jbEdit'); if (jbE) jbE.onclick = editJointBalance;
+  document.querySelectorAll('[data-jb]').forEach(function (b) { b.onclick = editJointBalance; });
+  document.querySelectorAll('[data-gotab]').forEach(function (b) { b.onclick = function () { gotoTab(b.dataset.gotab); }; });
+  document.querySelectorAll('[data-basis]').forEach(function (b) { b.onclick = function () { BASIS = b.dataset.basis; renderHome(); }; });
+  document.querySelectorAll('details[data-k]').forEach(function (d) { d.addEventListener('toggle', function () { OPEN[d.dataset.k] = d.open; }); });
+  bindSpark(sp);
+  bindJump();
+  document.querySelectorAll('.jump a').forEach(function (a) { a.addEventListener('click', function () { var t = document.querySelector(a.getAttribute('href')), d = t && t.querySelector('details.secd'); if (d && !d.open) { d.open = true; OPEN[d.dataset.k] = true; } }); });
+  if (keepY) window.scrollTo(0, keepY);
+}
+function bindJump() {
+  var links = document.querySelectorAll('.jump a'); if (!links.length || !('IntersectionObserver' in window)) return;
+  if (bindJump.io) bindJump.io.disconnect();
+  var secs = ['state', 'spend', 'scen', 'basis'].map(function (k) { return document.getElementById('sec-' + k); });
+  bindJump.io = new IntersectionObserver(function (es) {
+    es.forEach(function (e) { if (e.isIntersecting) { var i = secs.indexOf(e.target); links.forEach(function (a, j) { a.classList.toggle('on', i === j); }); } });
+  }, { rootMargin: '-30% 0px -60% 0px' });
+  secs.forEach(function (s) { if (s) bindJump.io.observe(s); });
+}
+
+// ---------- 설정: 목적별 묶음, 접기, 저장 범위 표시 (입력 칸 ID와 저장 코드는 그대로) ----------
+function decorateSet() {
+  var root = $('#tab-set'); if (!root) return;
+  var r = calc(), S = r.settings, A = S.alert, rc0 = (S.recurring && S.recurring[0]) || null;
+  var META = [
+    ['시작 숫자', 'a', 'shared', S.confirmed ? '확인됨' : '확인 필요'],
+    ['계획', 'b', 'shared', '월 ' + man(S.monthly.life) + ' · 목표일 ' + dl(S.targetDate, r.today)],
+    ['정기 입금 예정', 'b', 'shared', rc0 && +rc0.amount > 0 ? esc(rc0.who) + ' 매월 ' + man(rc0.amount) : '꺼짐'],
+    ['알림 기준', 'c', 'shared', '주의 ' + Math.round(A.paceWarn * 100) + '% · 위험 ' + Math.round(A.paceDanger * 100) + '%'],
+    ['나와 공유', 'd', 'device', '이 기기 사용자: ' + esc(ME)],
+    ['데이터', 'd', 'none', '백업 파일 내려받기']
+  ];
+  var GROUP = { a: ['내 숫자 바로잡기', '실제 코인 수량과 현금이 기록과 맞는지 확인해요'], b: ['계획과 입금', '런웨이 계산의 기준이 되는 값이에요'], c: ['알림', '홈 위쪽 경고를 띄우는 기준이에요'], d: ['이 기기와 데이터', '공유 주소, 사용자, 백업이에요'] };
+  var SCOPE = { shared: '저장 범위: 둘 다에게 반영', device: '저장 범위: 이 기기만', none: '저장 안 함 · 파일로만' };
+  var seen = {};
+  [].slice.call(root.querySelectorAll('.card')).forEach(function (card) {
+    var h3 = card.querySelector('h3'); if (!h3) return;
+    var title = (h3.firstChild ? h3.firstChild.textContent : '').trim();
+    var m = META.filter(function (x) { return title.indexOf(x[0]) === 0; })[0]; if (!m) return;
+    if (!seen[m[1]]) { seen[m[1]] = 1; var g = document.createElement('div'); g.className = 'grp'; g.innerHTML = '<h2>' + GROUP[m[1]][0] + '</h2><p>' + GROUP[m[1]][1] + '</p>'; card.parentNode.insertBefore(g, card); }
+    var key = 'set:' + m[0], open = !!OPEN[key];
+    card.classList.add('fold'); if (!open) card.classList.add('closed');
+    var head = document.createElement('button'); head.type = 'button'; head.className = 'fold-h'; head.setAttribute('aria-expanded', String(open));
+    head.innerHTML = '<span class="fh-t"><b>' + m[0] + '</b><small>' + m[3] + '</small></span><span class="scope ' + m[2] + '">' + SCOPE[m[2]] + '</span><i aria-hidden="true"></i>';
+    h3.hidden = true; card.insertBefore(head, h3);
+    head.onclick = function () { var c = card.classList.toggle('closed'); head.setAttribute('aria-expanded', String(!c)); OPEN[key] = !c; };
+  });
+  var lab = { s_init: '이 숫자로 확정 · 둘 다에게 반영', s_adj: '맞추기 · 차이만큼 기록이 남아요', p_save: '계획 저장 · 둘 다에게 반영', r_save: '정기 입금 저장 · 둘 다에게 반영', a_save: '알림 기준 저장 · 둘 다에게 반영' };
+  Object.keys(lab).forEach(function (id) { var b = document.getElementById(id); if (b) b.textContent = lab[id]; });
 }
 function editJointBalance() {
   var cur = calc();
@@ -305,10 +468,13 @@ function recLine(r) {
   return { t: C.LABEL[r.type] + ' ' + a, s: (r.date || '') + ' · ' + who };
 }
 function renderRec() {
-  var h = '<div class="card"><h3>기록하기</h3><div class="chips">';
-  Object.keys(FORMS).forEach(function (k) { h += '<button data-rt="' + k + '" class="' + (k === RECTYPE ? 'on' : '') + '">' + FORMS[k].t + '</button>'; });
+  var h = tabHead('RECORD', '기록', '무엇을 남길지 고르면 필요한 칸만 보여요. 기록은 지우지 않고 취소만 해요.') + '<div class="card"><h3>무엇을 기록할까요 <small>자주 쓰는 순서</small></h3><div class="rt-grid" role="group" aria-label="기록 종류">';
+  var RT_ORDER = ['jbal', 'expense', 'joint', 'sale', 'planned'], RT_DESC = { jbal: '토스뱅크 잔액 확인', expense: '큰 지출 남기기', joint: '공금통장에 넣은 돈', sale: '코인을 판 기록', planned: '나갈 날짜가 정해진 돈' };
+  RT_ORDER.forEach(function (k) { h += '<button type="button" data-rt="' + k + '" class="rt' + (k === RECTYPE ? ' on' : '') + '" aria-pressed="' + (k === RECTYPE) + '"><b>' + FORMS[k].t + '</b><small>' + RT_DESC[k] + '</small></button>'; });
   h += '</div><div id="recform">';
-  FORMS[RECTYPE].f.forEach(function (f) { h += field(f[0], f[1], f[2], f[3]); });
+  var OPTF = { sale: ['date', 'req', 'memo'], jbal: ['date', 'memo'], joint: ['date', 'src', 'memo'], expense: ['date', 'plan', 'memo'], planned: ['memo'] }[RECTYPE], optH = '';
+  FORMS[RECTYPE].f.forEach(function (f) { if (OPTF.indexOf(f[0]) >= 0) optH += field(f[0], f[1], f[2], f[3]); else h += field(f[0], f[1], f[2], f[3]); });
+  h += '<details class="more" data-k="more-' + RECTYPE + '"' + (OPEN['more-' + RECTYPE] ? ' open' : '') + '><summary>더 입력 <span class="sub">' + (OPTF.indexOf('date') >= 0 ? '날짜는 오늘로 들어가요 · ' : '') + '선택</span><i aria-hidden="true"></i></summary>' + optH + '</details>';
   if (RECTYPE === 'sale') h += '<div class="hint" id="salehint"></div><div class="hint">판 수량만큼 코인이 줄고, 수수료 뗀 입금액만큼 공금통장 잔액이 늘어나요.</div>';
   if (RECTYPE === 'jbal') h += '<div class="hint">토스뱅크 앱에 보이는 잔액 그대로 넣어 주세요. 입력할 때마다 직전 입력 이후 쓴 돈이 계산돼서 소비 속도와 런웨이가 바뀌어요.</div>';
   if (RECTYPE === 'expense') h += '<div class="hint">안 적어도 잔액 변화로 쓴 돈이 잡혀요. 큰 지출을 따로 남겨 두고 싶을 때만 적어 주세요.</div>';
@@ -320,10 +486,10 @@ function renderRec() {
   h += '<div class="sub" style="margin-bottom:6px"><b>잔액 입력 기록</b> (입력 사이에 쓴 돈)</div>';
   if (!r.anchors.length) h += '<div class="sub">아직 없어요. 위에서 "잔액 입력"으로 넣어 주세요.</div>';
   else {
-    h += '<table class="tb"><tr><th>날짜</th><th>잔액</th><th>들어온 돈</th><th>쓴 돈</th></tr>';
-    var rows = r.anchors.map(function (a, i) { var iv = i > 0 ? r.intervals[i - 1] : null; return { a: a, iv: iv }; }).reverse().slice(0, 15);
-    rows.forEach(function (x) { h += '<tr><td>' + md(x.a.date) + ' ' + esc(x.a.by || '') + '</td><td>' + won(x.a.amount) + '</td><td>' + (x.iv ? won(x.iv.inflow) : '-') + '</td><td>' + (x.iv ? won(x.iv.spend) + (x.iv.days ? '<br><small class="muted">' + x.iv.days + '일, 하루 ' + won(x.iv.spend / x.iv.days) + '</small>' : '') : '-') + '</td></tr>'; });
-    h += '</table>';
+    var rows = r.anchors.map(function (a, i) { var iv = i > 0 ? r.intervals[i - 1] : null; return { a: a, iv: iv }; }).reverse(); var anchTotal = rows.length; rows = rows.slice(0, anchLimit);
+    h += '<ul class="rc-list">';
+    rows.forEach(function (x) { h += '<li class="rc"><div class="rc-top"><span class="rc-d">' + md(x.a.date) + ' · ' + esc(x.a.by || '') + ' 입력</span><b class="rc-v num">' + won(x.a.amount) + '</b></div>' + (x.iv ? '<div class="rc-sub"><span>들어온 돈 ' + won(x.iv.inflow) + '</span><span>쓴 돈 ' + won(x.iv.spend) + (x.iv.days ? ' (' + x.iv.days + '일, 하루 ' + won(x.iv.spend / x.iv.days) + ')' : '') + '</span></div>' : '<div class="rc-sub"><span>첫 기록</span></div>') + '</li>'; });
+    h += '</ul>' + moreBtn('moreA', anchTotal, anchLimit);
   }
   // 입금 내역 (직접 적은 입금 + 정기 입금 자동분 + 안 들어온 달)
   var deps = [];
@@ -346,7 +512,7 @@ function renderRec() {
   var sales = recs.filter(function (x) { return x.type === 'sale' && !x.canceled; }).sort(function (a, b) { return a.date < b.date ? 1 : -1; });
   h += '<div class="card"><h3>매도 내역 <small>판 돈 누계 ' + won(sales.reduce(function (s, x) { return s + (+x.krw || 0); }, 0)) + '</small></h3>';
   if (!sales.length) h += '<div class="sub">아직 매도 기록이 없어요.</div>';
-  else { h += '<table class="tb"><tr><th>날짜</th><th>코인</th><th>수량</th><th>매도가</th><th>수수료</th><th>입금액</th></tr>'; sales.forEach(function (x) { h += '<tr><td>' + esc(x.date.slice(5)) + '</td><td>' + x.coin + '</td><td>' + n2(x.qty) + '</td><td>' + won(x.price) + '</td><td>' + won(Math.max(0, x.qty * x.price - x.krw)) + '</td><td>' + won(x.krw) + '</td></tr>'; }); h += '</table>'; }
+  else { h += '<ul class="rc-list">'; sales.slice(0, saleLimit).forEach(function (x) { var fee = Math.max(0, x.qty * x.price - x.krw); h += '<li class="rc"><div class="rc-top"><span class="rc-d">' + esc(x.date.slice(5).replace('-', '/')) + ' · ' + x.coin + ' ' + n2(x.qty) + '개</span><b class="rc-v num">' + won(x.krw) + '</b></div><div class="rc-sub"><span>매도가 ' + won(x.price) + '</span><span>수수료 ' + won(fee) + '</span></div></li>'; }); h += '</ul>' + moreBtn('moreS', sales.length, saleLimit); }
   h += '</div>';
 
   // 전체 기록
@@ -362,6 +528,8 @@ function renderRec() {
   if (all.length > histLimit) h += '<button class="btn gray" id="more">더 보기</button>';
   h += '</div></div>';
   $('#tab-rec').innerHTML = h;
+  bindMore();
+  document.querySelectorAll('#tab-rec details[data-k]').forEach(function (d) { d.addEventListener('toggle', function () { OPEN[d.dataset.k] = d.open; }); });
   document.querySelectorAll('[data-rt]').forEach(function (b) { b.onclick = function () { RECTYPE = b.dataset.rt; renderRec(); }; });
   document.querySelectorAll('input[inputmode=numeric]').forEach(function (i) { i.onblur = function () { var v = parseNum(i.value); if (isFinite(v)) i.value = v.toLocaleString('ko-KR'); }; });
   if (RECTYPE === 'sale') setupSaleForm();
@@ -436,7 +604,7 @@ function cancelRec(id) {
 function renderMemo() {
   var recs = LEDGER.records || [];
   var memos = recs.filter(function (r) { return r.type === 'memo' && !r.canceled; }).sort(function (a, b) { return (a.createdAt || '') < (b.createdAt || '') ? 1 : -1; });
-  var h = '<div class="card"><h3>요청 남기기</h3><textarea id="mtext" placeholder="예: 10월 생활비 - SOL 5개 정도 매도하면 될 듯"></textarea><button class="btn" id="madd">요청으로 남기기</button><div class="hint">결정(요청)과 실제 실행(매도 기록)이 따로 남아요. 매도를 기록할 때 이 요청을 연결하면 자동으로 완료돼요.</div></div>';
+  var h = tabHead('MEMO', '메모', '결정(요청)과 실제 실행(매도 기록)을 따로 남겨요.') + '<div class="card"><h3>요청 남기기</h3><textarea id="mtext" placeholder="예: 10월 생활비 - SOL 5개 정도 매도하면 될 듯"></textarea><button class="btn" id="madd">요청으로 남기기</button><div class="hint">결정(요청)과 실제 실행(매도 기록)이 따로 남아요. 매도를 기록할 때 이 요청을 연결하면 자동으로 완료돼요.</div></div>';
   var open = memos.filter(function (m) { return m.status === 'open'; }), done = memos.filter(function (m) { return m.status !== 'open'; });
   h += '<div class="card"><h3>진행 중인 요청 <small>' + open.length + '건</small></h3><div class="list">';
   if (!open.length) h += '<div class="sub">진행 중인 요청이 없어요.</div>';
@@ -471,7 +639,7 @@ function renderSet() {
   var S = C.defaults(JSON.parse(JSON.stringify(LEDGER.settings || {}))), I = S.initial || {}, A = S.alert;
   var hasRecs = (LEDGER.records || []).some(function (r) { return r.type !== 'memo' && !r.canceled; });
   var r = calc();
-  var h = '<div class="card"><h3>시작 숫자 <small>' + (S.confirmed ? '확인됨' : '확인 필요') + '</small></h3>';
+  var h = tabHead('SETTINGS', '설정', '시작 숫자, 계획, 정기 입금, 알림 기준을 바꿔요.') + '<div class="card"><h3>시작 숫자 <small>' + (S.confirmed ? '확인됨' : '확인 필요') + '</small></h3>';
   if (!hasRecs) {
     h += '<div class="sub">기록을 시작하기 전 실제 숫자를 넣어 주세요. 코인은 여러 거래소 것을 모두 합쳐서요.</div>';
     h += '<label class="f">기준일</label><input id="s_asOf" type="date" value="' + esc(I.asOf || today()) + '">';
@@ -519,6 +687,7 @@ function renderSet() {
   h += '<div class="hint">주소를 아는 사람은 누구나 보고 기록할 수 있어요. 기록은 지워지지 않고 취소만 돼서, 잘못 들어가도 되돌릴 수 있어요.</div></div>';
   h += '<div class="card"><h3>데이터</h3><div class="sub">모든 기록은 비공개 저장소(runway-data)에 저장되고, 바뀔 때마다 변경 이력이 남아요.</div><button class="btn gray" id="x_dl">기록 파일 내려받기 (백업)</button></div>';
   $('#tab-set').innerHTML = h;
+  decorateSet();
   var v = function (id) { var el = $('#' + id); return el ? el.value : ''; };
   var si = $('#s_init'); if (si) si.onclick = function () {
     var ini = Object.assign({}, I, { asOf: v('s_asOf'), SOL: parseNum(v('s_SOL')) || 0, WLD: parseNum(v('s_WLD')) || 0, cash: parseNum(v('s_cash')) || 0, corpBalance: parseNum(v('s_corp')) || +I.corpBalance || 0 });
@@ -552,11 +721,12 @@ function renderSet() {
     if (Object.keys(na).some(function (k) { return !isFinite(na[k]) || na[k] < 0; })) return toast('숫자를 확인해 주세요');
     doSave(function (L) { L.settings.alert = Object.assign(L.settings.alert || {}, na); }, '알림 기준 변경', '알림 기준을 저장했어요');
   };
-  $('#d_me').onclick = function () { var other = ME === '택' ? '쮸' : '택'; if (confirm('이 기기 사용자를 ' + other + '(으)로 바꿀까요?')) { localStorage.setItem('runway.me', other); ME = other; toast('이제 ' + other + '(으)로 기록돼요'); renderSet(); } };
+  $('#d_me').onclick = function () { var other = ME === '택' ? '쮸' : '택'; if (confirm('이 기기 사용자를 ' + other + '(으)로 바꿀까요?')) { localStorage.setItem('runway.me', other); ME = other; var mc2 = $('#me-chip'); if (mc2) mc2.textContent = ME; toast('이제 ' + other + '(으)로 기록돼요'); renderSet(); } };
   $('#d_copy').onclick = function () { navigator.clipboard.writeText(pageUrl()).then(function () { toast('주소를 복사했어요'); }, function () { prompt('아래 주소를 복사해 주세요', pageUrl()); }); };
   $('#d_qr').onclick = function () { var q = qrcode(0, 'M'); q.addData(pageUrl()); q.make(); $('#d_out').innerHTML = '<div class="qr">' + q.createSvgTag({ cellSize: 5, margin: 2, scalable: true }) + '</div><div class="hint">휴대폰 카메라로 찍으면 바로 열려요.</div>'; };
   $('#x_dl').onclick = function () { var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(LEDGER, null, 1)], { type: 'application/json' })); a.download = 'runway-ledger-' + today() + '.json'; a.click(); };
 }
 
+['pointerdown', 'touchstart', 'touchmove', 'wheel'].forEach(function (ev) { document.addEventListener(ev, function () { lastTouch = Date.now(); }, { passive: true }); });
 boot();
 })();
